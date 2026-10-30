@@ -251,6 +251,7 @@ function EventDetailView({
   const [spaceRequested, setSpaceRequested] = useState<(typeof SPACE_OPTIONS)[number]['id'] | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleteText, setDeleteText] = useState('');
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(() => {
     setError(null);
@@ -303,14 +304,14 @@ function EventDetailView({
     if (deleteText !== 'delete') {
       return;
     }
-    setBusy(true);
+    setDeleting(true);
     setError(null);
     try {
       await deleteEvent(token, eventId);
       onBack();
     } catch (reason) {
       setError(messageFrom(reason));
-      setBusy(false);
+      setDeleting(false);
     }
   }
 
@@ -480,22 +481,22 @@ function EventDetailView({
                   />
                   <Pressable
                     accessibilityRole="button"
-                    disabled={busy || deleteText !== 'delete'}
+                    disabled={deleting || deleteText !== 'delete'}
                     onPress={() => {
                       void removeEvent();
                     }}
                     style={({ pressed }) => [
                       styles.deleteButton,
-                      (busy || deleteText !== 'delete') && styles.disabled,
+                      (deleting || deleteText !== 'delete') && styles.disabled,
                       pressed && styles.pressed,
                       pointer,
                     ]}
                   >
-                    <Text style={styles.primaryLabel}>{busy ? 'Deleting…' : 'Delete event'}</Text>
+                    <Text style={styles.primaryLabel}>{deleting ? 'Deleting…' : 'Delete event'}</Text>
                   </Pressable>
                   <Pressable
                     accessibilityRole="button"
-                    disabled={busy}
+                    disabled={deleting}
                     onPress={() => {
                       setConfirmingDelete(false);
                       setDeleteText('');
