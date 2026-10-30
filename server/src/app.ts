@@ -19,7 +19,13 @@ import {
   upsertUser,
 } from './db.js';
 import { parseVendorProfile, ProfileError } from './profile.js';
-import { confirmedPayment, createBoothCheckout, inspectCheckout, PaymentError } from './stripe.js';
+import {
+  confirmedPayment,
+  createBoothCheckout,
+  inspectCheckout,
+  PaymentError,
+  refundRegistrationPayment,
+} from './stripe.js';
 import type { CurrentUser, EventInput } from './types.js';
 
 type AppVariables = {
@@ -101,6 +107,8 @@ app.use('/me', requireUser);
 app.use('/me/*', requireUser);
 app.use('/events', requireUser, requireProfile);
 app.use('/events/*', requireUser, requireProfile);
+app.use('/payments', requireUser, requireProfile);
+app.use('/payments/*', requireUser, requireProfile);
 
 app.get('/me', (c) => c.json({ user: c.get('user') }));
 
@@ -149,7 +157,24 @@ app.post('/events/:id/registrations', async (c) => {
 });
 
 app.delete('/events/:id/registrations', async (c) => {
-  await unregisterFromEvent(c.req.param('id'), c.get('user').id);
+  const user = c.get('user');
+  const eventId = c.req.param('id');
+  const registration = await getOwnedRegistration(eventId, user.id);
+  if (registration?.paidAt && !registration.stripeCheckoutSessionId) {
+    throw new HttpError(
+      409,
+      'This registration was paid, but the Stripe payment could not be found. It was not canceled.',
+    );
+  }
+  if (registration?.stripeCheckoutSessionId) {
+    await refundRegistrationPayment({
+      sessionId: registration.stripeCheckoutSessionId,
+      registrationId: registration.id,
+      userId: user.id,
+      eventId,
+    });
+  }
+  await unregisterFromEvent(eventId, user.id);
   const result = await getEvent(c.req.param('id'), c.get('user'));
   if (!result) {
     throw new HttpError(404, 'That event does not exist.');

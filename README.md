@@ -21,7 +21,7 @@ The database is the Supabase project at `https://fiwpwhgcyhaujunmcdxw.supabase.c
 2. In Project Settings → API, copy the `service_role` key into `SUPABASE_SERVICE_ROLE_KEY` in `.env`.
 3. Set `SESSION_SECRET` in `.env` to a long random string.
 
-Booth fees are charged with Stripe Checkout in test mode. `STRIPE_TEST_SECRET_KEY` stays on the server. A Crosswinds resident pays $5. Anyone else pays $10. Registration is saved either way, and an unpaid registration is highlighted on the events page until Stripe reports the payment.
+Booth fees are charged with Stripe Checkout in test mode. `STRIPE_TEST_SECRET_KEY` stays on the server. A Crosswinds resident pays $5. Anyone else pays $10. Registration is saved either way, and an unpaid registration is highlighted on the events page until Stripe reports the payment. Canceling a paid registration refunds that booth fee through Stripe before the signup is removed.
 
 The service role key is used only by the server. Row level security blocks the anon and publishable keys. Authenticated requests carry a session issued after the Google or Microsoft identity token is verified. Creating an event is limited to `andrew@bishop4.com` and `louise@bishop4.com`.
 

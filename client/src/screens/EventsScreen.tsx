@@ -278,7 +278,9 @@ function EventDetailView({
             {event.description ? <Text style={styles.body}>{event.description}</Text> : null}
             <Text style={styles.meta}>{registrationLabel(event)}</Text>
             <Text style={styles.body}>{feeLabel(event)}</Text>
-            {event.registered && event.paid ? <Text style={styles.paidLabel}>Paid</Text> : null}
+            {event.registered && event.paid ? (
+              <Text style={styles.paidLabel}>Paid. Canceling refunds this booth fee through Stripe.</Text>
+            ) : null}
             {event.registered && !event.paid ? (
               <View style={styles.unpaidBanner}>
                 <Text style={styles.unpaidLabel}>
@@ -303,11 +305,15 @@ function EventDetailView({
             >
               <Text style={styles.primaryLabel}>
                 {busy
-                  ? 'Saving…'
+                  ? event.registered && event.paid
+                    ? 'Refunding…'
+                    : 'Saving…'
                   : full
                     ? 'Event is full'
                     : event.registered
-                      ? 'Cancel registration'
+                      ? event.paid
+                        ? 'Cancel and refund'
+                        : 'Cancel registration'
                       : 'Register'}
               </Text>
             </Pressable>

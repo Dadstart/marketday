@@ -94,6 +94,81 @@ export async function createBoothCheckout(input: {
   return { id: session.id, url: session.url };
 }
 
+export async function refundRegistrationPayment(input: {
+  sessionId: string;
+  registrationId: string;
+  userId: string;
+  eventId: string;
+}): Promise<void> {
+  const session = await retrieve(input.sessionId);
+  if (!session) {
+    throw new PaymentError(
+      409,
+      'The Stripe payment for this registration could not be found, so it was not canceled.',
+    );
+  }
+  if (
+    session.metadata?.registrationId !== input.registrationId ||
+    session.metadata?.userId !== input.userId ||
+    session.metadata?.eventId !== input.eventId
+  ) {
+    throw new PaymentError(403, 'That payment belongs to another registration.');
+  }
+
+  if (session.status === 'open') {
+    try {
+      await stripe().checkout.sessions.expire(input.sessionId);
+    } catch (error) {
+      throw stripeFailure(error);
+    }
+    return;
+  }
+
+  if (session.payment_status !== 'paid') {
+    return;
+  }
+
+  const paymentIntentId =
+    typeof session.payment_intent === 'string' ? session.payment_intent : session.payment_intent?.id;
+  if (!paymentIntentId) {
+    throw new PaymentError(
+      409,
+      'The Stripe payment for this registration could not be found, so it was not canceled.',
+    );
+  }
+
+  let intent: Stripe.PaymentIntent;
+  try {
+    intent = await stripe().paymentIntents.retrieve(paymentIntentId, { expand: ['latest_charge'] });
+  } catch (error) {
+    throw stripeFailure(error);
+  }
+
+  const amount = intent.amount_received || intent.amount;
+  if (!isBoothFee(amount)) {
+    throw new PaymentError(400, 'The payment amount does not match a booth fee, so it was not refunded.');
+  }
+  const charge = intent.latest_charge;
+  if (charge && typeof charge !== 'string' && charge.amount_refunded >= amount) {
+    return;
+  }
+
+  try {
+    await stripe().refunds.create(
+      {
+        payment_intent: paymentIntentId,
+        reason: 'requested_by_customer',
+      },
+      { idempotencyKey: `registration-refund-${input.registrationId}` },
+    );
+  } catch (error) {
+    if (error instanceof Stripe.errors.StripeInvalidRequestError && error.code === 'charge_already_refunded') {
+      return;
+    }
+    throw stripeFailure(error);
+  }
+}
+
 export async function confirmedPayment(sessionId: string): Promise<ConfirmedPayment> {
   const session = await retrieve(sessionId);
   if (!session) {
