@@ -3,12 +3,15 @@ import type { Offering, SpaceRequest, VendorProfileInput } from './types.js';
 const SPACES = new Set<SpaceRequest>(['grass-generator', 'grass', 'food-truck', 'pavilion']);
 const OFFERINGS = new Set<Offering>(['retail', 'food', 'service', 'group', 'entertainment']);
 
-export function parseVendorProfile(body: Record<string, unknown>): VendorProfileInput {
-  const spaceRequested = body.spaceRequested;
-  const offering = body.offering;
-  if (!isSpace(spaceRequested)) {
+export function parseSpaceRequest(value: unknown): SpaceRequest {
+  if (!isSpace(value)) {
     throw new ProfileError('Choose the space you are requesting.');
   }
+  return value;
+}
+
+export function parseVendorProfile(body: Record<string, unknown>): VendorProfileInput {
+  const offering = body.offering;
   if (!isOffering(offering)) {
     throw new ProfileError('Choose what you will offer.');
   }
@@ -24,7 +27,6 @@ export function parseVendorProfile(body: Record<string, unknown>): VendorProfile
     businessName: requiredText(body.businessName, 2, 160, 'Enter the business name.'),
     phone: requiredPhone(body.phone),
     crosswindsResident: body.crosswindsResident,
-    spaceRequested,
     offering,
     productsAndServices: requiredText(
       body.productsAndServices,

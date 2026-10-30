@@ -4,12 +4,15 @@ import { isAdminEmail } from './admins.js';
 import { supabaseServiceRoleKey, supabaseUrl } from './env.js';
 import { feeCents } from './fees.js';
 import type {
+  AccountDetail,
+  AccountSummary,
   CurrentUser,
   EventInput,
   EventRecord,
   Identity,
   ProviderName,
   RegistrationRecord,
+  SpaceRequest,
   VendorProfileInput,
 } from './types.js';
 
@@ -41,6 +44,7 @@ type RegistrationRow = {
   user_id: string;
   created_at: string;
   paid_at: string | null;
+  space_requested: string | null;
 };
 
 type RegistrantRow = {
@@ -48,6 +52,8 @@ type RegistrantRow = {
   user_id: string;
   created_at: string;
   paid_at: string | null;
+  amount_cents: number | null;
+  space_requested: string | null;
   users: { name: string; email: string } | { name: string; email: string }[] | null;
 };
 
@@ -107,7 +113,6 @@ export async function saveVendorProfile(userId: string, input: VendorProfileInpu
       business_name: input.businessName,
       phone: input.phone,
       crosswinds_resident: input.crosswindsResident,
-      space_requested: input.spaceRequested,
       offering: input.offering,
       products_and_services: input.productsAndServices,
       facebook_name: input.facebookName,
@@ -126,7 +131,7 @@ export async function saveVendorProfile(userId: string, input: VendorProfileInpu
 }
 
 const profileColumns =
-  'venmo, contact_person, business_name, phone, crosswinds_resident, space_requested, offering, products_and_services, facebook_name, profile_completed_at';
+  'venmo, contact_person, business_name, phone, crosswinds_resident, offering, products_and_services, facebook_name, profile_completed_at';
 
 type ProfileRow = {
   venmo: string | null;
@@ -134,14 +139,12 @@ type ProfileRow = {
   business_name: string | null;
   phone: string | null;
   crosswinds_resident: boolean | null;
-  space_requested: string | null;
   offering: string | null;
   products_and_services: string | null;
   facebook_name: string | null;
   profile_completed_at: string | null;
 };
 
-const spaces = new Set(['grass-generator', 'grass', 'food-truck', 'pavilion']);
 const offerings = new Set(['retail', 'food', 'service', 'group', 'entertainment']);
 
 export async function getVendorProfile(userId: string): Promise<VendorProfileInput | null> {
@@ -161,11 +164,13 @@ export async function listEvents(userId: string): Promise<EventRecord[]> {
   const counts = new Map<string, number>();
   const mine = new Set<string>();
   const paid = new Set<string>();
+  const spaces = new Map<string, string | null>();
 
   for (const registration of registrations) {
     counts.set(registration.event_id, (counts.get(registration.event_id) ?? 0) + 1);
     if (registration.user_id === userId) {
       mine.add(registration.event_id);
+      spaces.set(registration.event_id, registration.space_requested);
       if (registration.paid_at) {
         paid.add(registration.event_id);
       }
@@ -179,6 +184,7 @@ export async function listEvents(userId: string): Promise<EventRecord[]> {
       mine.has(event.id),
       paid.has(event.id),
       boothFee?.cents ?? null,
+      spaces.get(event.id) ?? null,
     ),
   );
 }
@@ -202,7 +208,7 @@ export async function getEvent(
 
   const { data: registrationRows, error: registrationError } = await supabase
     .from('registrations')
-    .select('id, user_id, created_at, paid_at, users(name, email)')
+    .select('id, user_id, created_at, paid_at, amount_cents, space_requested, users(name, email)')
     .eq('event_id', eventId)
     .order('created_at', { ascending: true });
 
@@ -217,8 +223,12 @@ export async function getEvent(
     const showEmail = user.admin || row.user_id === user.id;
     return {
       id: row.id,
+      userId: user.admin ? row.user_id : null,
       name: account?.name ?? 'Registered user',
       email: showEmail ? email : null,
+      paid: user.admin ? row.paid_at != null : null,
+      amountCents: user.admin ? row.amount_cents : null,
+      spaceRequested: user.admin ? row.space_requested : null,
       createdAt: row.created_at,
     };
   });
@@ -233,6 +243,7 @@ export async function getEvent(
       mine != null,
       mine?.paid_at != null,
       boothFee?.cents ?? null,
+      mine?.space_requested ?? null,
     ),
     registrations,
   };
@@ -258,7 +269,77 @@ export async function createEvent(userId: string, input: EventInput): Promise<Ev
   }
 
   const boothFee = await getBoothFee(userId);
-  return toEventRecord(data as EventRow, 0, false, false, boothFee?.cents ?? null);
+  return toEventRecord(data as EventRow, 0, false, false, boothFee?.cents ?? null, null);
+}
+
+const accountSummaryColumns = 'id, name, email, business_name, profile_completed_at';
+const accountDetailColumns =
+  'id, name, email, provider, business_name, venmo, contact_person, phone, crosswinds_resident, offering, products_and_services, facebook_name, profile_completed_at, created_at';
+
+type AccountSummaryRow = {
+  id: string;
+  name: string;
+  email: string;
+  business_name: string | null;
+  profile_completed_at: string | null;
+};
+
+type AccountDetailRow = AccountSummaryRow & {
+  provider: ProviderName;
+  venmo: string | null;
+  contact_person: string | null;
+  phone: string | null;
+  crosswinds_resident: boolean | null;
+  offering: string | null;
+  products_and_services: string | null;
+  facebook_name: string | null;
+  created_at: string;
+};
+
+export async function listAccounts(): Promise<AccountSummary[]> {
+  const { data, error } = await supabase.from('users').select(accountSummaryColumns).order('name', { ascending: true });
+  if (error) {
+    throw databaseFailure(error.message);
+  }
+  return ((data ?? []) as AccountSummaryRow[]).map(toAccountSummary);
+}
+
+export async function getAccount(userId: string): Promise<AccountDetail | null> {
+  const { data, error } = await supabase.from('users').select(accountDetailColumns).eq('id', userId).maybeSingle();
+  if (error) {
+    throw databaseFailure(error.message);
+  }
+  if (!data) {
+    return null;
+  }
+  const row = data as AccountDetailRow;
+  return {
+    ...toAccountSummary(row),
+    provider: row.provider,
+    venmo: blankToNull(row.venmo),
+    contactPerson: blankToNull(row.contact_person),
+    phone: blankToNull(row.phone),
+    crosswindsResident: row.crosswinds_resident,
+    offering: blankToNull(row.offering),
+    productsAndServices: blankToNull(row.products_and_services),
+    facebookName: blankToNull(row.facebook_name),
+    createdAt: row.created_at,
+  };
+}
+
+function toAccountSummary(row: AccountSummaryRow): AccountSummary {
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    businessName: blankToNull(row.business_name),
+    profileComplete: row.profile_completed_at != null,
+  };
+}
+
+function blankToNull(value: string | null): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
 }
 
 export async function getBoothFee(userId: string): Promise<BoothFee | null> {
@@ -329,10 +410,15 @@ export async function markRegistrationPaid(
   }
 }
 
-export async function registerForEvent(eventId: string, userId: string): Promise<void> {
+export async function registerForEvent(
+  eventId: string,
+  userId: string,
+  spaceRequested: SpaceRequest,
+): Promise<void> {
   const { error } = await supabase.rpc('register_for_event', {
     p_event_id: eventId,
     p_user_id: userId,
+    p_space_requested: spaceRequested,
   });
 
   if (!error) {
@@ -344,6 +430,9 @@ export async function registerForEvent(eventId: string, userId: string): Promise
   }
   if (error.message.includes('event_full')) {
     throw new DatabaseError(409, 'This event is full.');
+  }
+  if (error.message.includes('invalid_space')) {
+    throw new DatabaseError(400, 'Choose the space you are requesting.');
   }
   throw databaseFailure(error.message);
 }
@@ -384,7 +473,7 @@ async function selectEvents(): Promise<EventRow[]> {
 async function selectRegistrations(): Promise<RegistrationRow[]> {
   const { data, error } = await supabase
     .from('registrations')
-    .select('id, event_id, user_id, created_at, paid_at');
+    .select('id, event_id, user_id, created_at, paid_at, space_requested');
   if (error) {
     throw databaseFailure(error.message);
   }
@@ -399,8 +488,6 @@ function toVendorProfile(row: ProfileRow): VendorProfileInput | null {
     !row.business_name ||
     !row.phone ||
     typeof row.crosswinds_resident !== 'boolean' ||
-    !row.space_requested ||
-    !spaces.has(row.space_requested) ||
     !row.offering ||
     !offerings.has(row.offering) ||
     !row.products_and_services
@@ -414,7 +501,6 @@ function toVendorProfile(row: ProfileRow): VendorProfileInput | null {
     businessName: row.business_name,
     phone: row.phone,
     crosswindsResident: row.crosswinds_resident,
-    spaceRequested: row.space_requested as VendorProfileInput['spaceRequested'],
     offering: row.offering as VendorProfileInput['offering'],
     productsAndServices: row.products_and_services,
     facebookName: row.facebook_name,
@@ -439,6 +525,7 @@ function toEventRecord(
   registered: boolean,
   paid: boolean,
   feeCents: number | null,
+  spaceRequested: string | null,
 ): EventRecord {
   return {
     id: row.id,
@@ -452,6 +539,7 @@ function toEventRecord(
     registered,
     paid: registered && paid,
     feeCents,
+    spaceRequested: registered ? spaceRequested : null,
     createdAt: row.created_at,
   };
 }

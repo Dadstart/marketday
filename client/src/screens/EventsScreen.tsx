@@ -23,12 +23,29 @@ import {
   type EventSummary,
 } from '../api/client';
 import { useAuth } from '../auth/AuthProvider';
+import { AccountDetailView, AccountList } from './UsersScreen';
 import { colors, pointer, serif } from '../theme';
+
+const SPACE_OPTIONS = [
+  { id: 'grass-generator', label: '10x10 grass plus generator' },
+  { id: 'grass', label: '10x10 grass' },
+  { id: 'food-truck', label: 'Food truck' },
+  { id: 'pavilion', label: '10x10 pavilion' },
+] as const;
+
+function spaceLabel(id: string | null): string {
+  if (!id) {
+    return 'Not chosen';
+  }
+  return SPACE_OPTIONS.find((option) => option.id === id)?.label ?? id;
+}
 
 type Screen =
   | { name: 'list' }
   | { name: 'detail'; id: string }
-  | { name: 'create' };
+  | { name: 'create' }
+  | { name: 'users' }
+  | { name: 'account'; id: string; back: 'users' | 'detail'; eventId?: string };
 
 export function EventsScreen({ onEditProfile }: { onEditProfile: () => void }) {
   const { token, user, signOut } = useAuth();
@@ -49,6 +66,15 @@ export function EventsScreen({ onEditProfile }: { onEditProfile: () => void }) {
           </Text>
         </View>
         <View style={styles.headerActions}>
+          {user.admin ? (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setScreen({ name: 'users' })}
+              style={pointer}
+            >
+              <Text style={styles.signOut}>Users</Text>
+            </Pressable>
+          ) : null}
           <Pressable accessibilityRole="button" onPress={onEditProfile} style={pointer}>
             <Text style={styles.signOut}>Profile</Text>
           </Pressable>
@@ -68,8 +94,30 @@ export function EventsScreen({ onEditProfile }: { onEditProfile: () => void }) {
       {screen.name === 'detail' ? (
         <EventDetailView
           token={token}
+          admin={user.admin}
           eventId={screen.id}
           onBack={() => setScreen({ name: 'list' })}
+          onOpenUser={(id) => setScreen({ name: 'account', id, back: 'detail', eventId: screen.id })}
+        />
+      ) : null}
+      {screen.name === 'users' ? (
+        <AccountList
+          token={token}
+          onBack={() => setScreen({ name: 'list' })}
+          onOpen={(id) => setScreen({ name: 'account', id, back: 'users' })}
+        />
+      ) : null}
+      {screen.name === 'account' ? (
+        <AccountDetailView
+          token={token}
+          userId={screen.id}
+          onBack={() =>
+            setScreen(
+              screen.back === 'detail' && screen.eventId
+                ? { name: 'detail', id: screen.eventId }
+                : { name: 'users' },
+            )
+          }
         />
       ) : null}
       {screen.name === 'create' ? (
@@ -185,16 +233,21 @@ function EventList({
 
 function EventDetailView({
   token,
+  admin,
   eventId,
   onBack,
+  onOpenUser,
 }: {
   token: string;
+  admin: boolean;
   eventId: string;
   onBack: () => void;
+  onOpenUser: (userId: string) => void;
 }) {
   const [detail, setDetail] = useState<EventDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [spaceRequested, setSpaceRequested] = useState<(typeof SPACE_OPTIONS)[number]['id'] | null>(null);
 
   const load = useCallback(() => {
     setError(null);
@@ -245,12 +298,16 @@ function EventDetailView({
     if (!event) {
       return;
     }
+    if (!event.registered && !spaceRequested) {
+      setError('Choose the space you are requesting.');
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
       const next = event.registered
         ? await unregisterFromEvent(token, event.id)
-        : await registerForEvent(token, event.id);
+        : await registerForEvent(token, event.id, spaceRequested as (typeof SPACE_OPTIONS)[number]['id']);
       setDetail(next);
     } catch (reason) {
       setError(messageFrom(reason));
@@ -278,6 +335,24 @@ function EventDetailView({
             {event.description ? <Text style={styles.body}>{event.description}</Text> : null}
             <Text style={styles.meta}>{registrationLabel(event)}</Text>
             <Text style={styles.body}>{feeLabel(event)}</Text>
+            {event.registered ? (
+              <Text style={styles.body}>Space requested: {spaceLabel(event.spaceRequested)}</Text>
+            ) : (
+              <>
+                <Text style={styles.label}>Space requested</Text>
+                {SPACE_OPTIONS.map((option) => (
+                  <Pressable
+                    key={option.id}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: spaceRequested === option.id }}
+                    onPress={() => setSpaceRequested(option.id)}
+                    style={[styles.choice, spaceRequested === option.id && styles.choiceSelected, pointer]}
+                  >
+                    <Text style={styles.choiceLabel}>{option.label}</Text>
+                  </Pressable>
+                ))}
+              </>
+            )}
             {event.registered && event.paid ? (
               <Text style={styles.paidLabel}>Paid. Canceling refunds this booth fee through Stripe.</Text>
             ) : null}
@@ -292,13 +367,13 @@ function EventDetailView({
             ) : null}
             <Pressable
               accessibilityRole="button"
-              disabled={busy || full}
+              disabled={busy || full || (!event.registered && !spaceRequested)}
               onPress={() => {
                 void changeRegistration();
               }}
               style={({ pressed }) => [
                 styles.primaryButton,
-                (busy || full) && styles.disabled,
+                (busy || full || (!event.registered && !spaceRequested)) && styles.disabled,
                 pressed && styles.pressed,
                 pointer,
               ]}
@@ -342,8 +417,25 @@ function EventDetailView({
             ) : (
               detail?.registrations.map((registration) => (
                 <View key={registration.id} style={styles.person}>
-                  <Text style={styles.personName}>{registration.name}</Text>
+                  {admin && registration.userId ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => onOpenUser(registration.userId as string)}
+                      style={pointer}
+                    >
+                      <Text style={styles.personLink}>{registration.name}</Text>
+                    </Pressable>
+                  ) : (
+                    <Text style={styles.personName}>{registration.name}</Text>
+                  )}
                   {registration.email ? <Text style={styles.muted}>{registration.email}</Text> : null}
+                  {admin ? <Text style={styles.meta}>Space requested: {spaceLabel(registration.spaceRequested)}</Text> : null}
+                  {registration.paid === true ? (
+                    <Text style={styles.paidLabel}>
+                      Paid{registration.amountCents != null ? ` ${formatFee(registration.amountCents)}` : ''}
+                    </Text>
+                  ) : null}
+                  {registration.paid === false ? <Text style={styles.unpaidLabel}>Payment due</Text> : null}
                 </View>
               ))
             )}
@@ -668,6 +760,11 @@ const styles = StyleSheet.create({
     color: colors.ink,
     fontSize: 16,
   },
+  personLink: {
+    color: colors.accent,
+    fontSize: 16,
+    fontWeight: '600',
+  },
   error: {
     color: colors.danger,
     backgroundColor: colors.dangerBackground,
@@ -680,6 +777,22 @@ const styles = StyleSheet.create({
     color: colors.ink,
     fontSize: 14,
     fontWeight: '600',
+  },
+  choice: {
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.card,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  choiceSelected: {
+    borderColor: colors.accent,
+    backgroundColor: '#F8E6DE',
+  },
+  choiceLabel: {
+    color: colors.ink,
+    fontSize: 16,
   },
   input: {
     backgroundColor: colors.card,

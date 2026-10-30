@@ -23,13 +23,38 @@ export type EventSummary = {
   registered: boolean;
   paid: boolean;
   feeCents: number | null;
+  spaceRequested: string | null;
   createdAt: string;
 };
 
 export type RegistrationSummary = {
   id: string;
+  userId: string | null;
   name: string;
   email: string | null;
+  paid: boolean | null;
+  amountCents: number | null;
+  spaceRequested: string | null;
+  createdAt: string;
+};
+
+export type AccountSummary = {
+  id: string;
+  name: string;
+  email: string;
+  businessName: string | null;
+  profileComplete: boolean;
+};
+
+export type AccountDetail = AccountSummary & {
+  provider: 'google' | 'microsoft';
+  venmo: string | null;
+  contactPerson: string | null;
+  phone: string | null;
+  crosswindsResident: boolean | null;
+  offering: string | null;
+  productsAndServices: string | null;
+  facebookName: string | null;
   createdAt: string;
 };
 
@@ -53,7 +78,6 @@ export type VendorProfileInput = {
   businessName: string;
   phone: string;
   crosswindsResident: boolean;
-  spaceRequested: 'grass-generator' | 'grass' | 'food-truck' | 'pavilion';
   offering: 'retail' | 'food' | 'service' | 'group' | 'entertainment';
   productsAndServices: string;
   facebookName: string | null;
@@ -94,6 +118,14 @@ export async function saveVendorProfile(
   return { user: normalizeUser(body.user) };
 }
 
+export function fetchAccounts(token: string): Promise<{ users: AccountSummary[] }> {
+  return request('/admin/users', token);
+}
+
+export function fetchAccount(token: string, userId: string): Promise<{ user: AccountDetail }> {
+  return request(`/admin/users/${userId}`, token);
+}
+
 export function fetchEvents(token: string): Promise<{ events: EventSummary[] }> {
   return request('/events', token);
 }
@@ -109,8 +141,15 @@ export function createEvent(token: string, draft: EventDraft): Promise<{ event: 
   });
 }
 
-export function registerForEvent(token: string, eventId: string): Promise<EventDetail> {
-  return request(`/events/${eventId}/registrations`, token, { method: 'POST' });
+export function registerForEvent(
+  token: string,
+  eventId: string,
+  spaceRequested: 'grass-generator' | 'grass' | 'food-truck' | 'pavilion',
+): Promise<EventDetail> {
+  return request(`/events/${eventId}/registrations`, token, {
+    method: 'POST',
+    body: JSON.stringify({ spaceRequested }),
+  });
 }
 
 export function unregisterFromEvent(token: string, eventId: string): Promise<EventDetail> {

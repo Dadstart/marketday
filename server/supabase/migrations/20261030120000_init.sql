@@ -14,9 +14,6 @@ create table public.users (
   business_name text,
   phone text,
   crosswinds_resident boolean,
-  space_requested text check (
-    space_requested is null or space_requested in ('grass-generator', 'grass', 'food-truck', 'pavilion')
-  ),
   offering text check (
     offering is null or offering in ('retail', 'food', 'service', 'group', 'entertainment')
   ),
@@ -49,6 +46,9 @@ create table public.registrations (
   paid_at timestamptz,
   amount_cents integer check (amount_cents is null or amount_cents in (500, 1000)),
   stripe_checkout_session_id text,
+  space_requested text check (
+    space_requested is null or space_requested in ('grass-generator', 'grass', 'food-truck', 'pavilion')
+  ),
   created_at timestamptz not null default now(),
   unique (event_id, user_id)
 );
@@ -66,7 +66,7 @@ revoke all on table public.events from anon, authenticated;
 revoke all on table public.registrations from anon, authenticated;
 
 -- Serializes signups for one event so capacity cannot be exceeded by simultaneous requests.
-create or replace function public.register_for_event(p_event_id uuid, p_user_id uuid)
+create or replace function public.register_for_event(p_event_id uuid, p_user_id uuid, p_space_requested text)
 returns public.registrations
 language plpgsql
 security definer
@@ -90,6 +90,10 @@ begin
   from public.registrations
   where event_id = p_event_id and user_id = p_user_id;
 
+  if p_space_requested is null or p_space_requested not in ('grass-generator', 'grass', 'food-truck', 'pavilion') then
+    raise exception 'invalid_space';
+  end if;
+
   if found then
     return existing_registration;
   end if;
@@ -104,13 +108,13 @@ begin
     end if;
   end if;
 
-  insert into public.registrations (event_id, user_id)
-  values (p_event_id, p_user_id)
+  insert into public.registrations (event_id, user_id, space_requested)
+  values (p_event_id, p_user_id, p_space_requested)
   returning * into existing_registration;
 
   return existing_registration;
 end;
 $$;
 
-revoke all on function public.register_for_event(uuid, uuid) from public, anon, authenticated;
-grant execute on function public.register_for_event(uuid, uuid) to service_role;
+revoke all on function public.register_for_event(uuid, uuid, text) from public, anon, authenticated;
+grant execute on function public.register_for_event(uuid, uuid, text) to service_role;

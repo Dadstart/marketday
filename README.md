@@ -17,7 +17,7 @@ The API listens on `http://localhost:8787`. The Expo app calls it after sign-in.
 
 The database is the Supabase project at `https://fiwpwhgcyhaujunmcdxw.supabase.co`.
 
-1. Open the SQL editor and run `server/supabase/migrations/20261030120000_init.sql`, then `server/supabase/migrations/20261030130000_vendor_profile.sql`, then `server/supabase/migrations/20261030140000_registration_payment.sql`.
+1. Open the SQL editor and run `server/supabase/migrations/20261030120000_init.sql`, then `server/supabase/migrations/20261030130000_vendor_profile.sql`, then `server/supabase/migrations/20261030140000_registration_payment.sql`, then `server/supabase/migrations/20261030150000_registration_space.sql`.
 2. In Project Settings → API, copy the `service_role` key into `SUPABASE_SERVICE_ROLE_KEY` in `.env`.
 3. Set `SESSION_SECRET` in `.env` to a long random string.
 

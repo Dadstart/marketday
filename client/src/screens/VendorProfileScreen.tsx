@@ -5,13 +5,6 @@ import { fetchVendorProfile, saveVendorProfile, type VendorProfileInput } from '
 import { useAuth } from '../auth/AuthProvider';
 import { colors, pointer, serif } from '../theme';
 
-const SPACE_OPTIONS = [
-  { id: 'grass-generator', label: '10x10 grass plus generator' },
-  { id: 'grass', label: '10x10 grass' },
-  { id: 'food-truck', label: 'Food truck' },
-  { id: 'pavilion', label: '10x10 pavilion' },
-] as const;
-
 const OFFERING_OPTIONS = [
   { id: 'retail', label: 'Retail products' },
   { id: 'food', label: 'Food' },
@@ -28,7 +21,6 @@ export function VendorProfileScreen({ onBack }: { onBack?: () => void }) {
   const [businessName, setBusinessName] = useState('');
   const [phone, setPhone] = useState('');
   const [crosswindsResident, setCrosswindsResident] = useState<boolean | null>(null);
-  const [spaceRequested, setSpaceRequested] = useState<VendorProfileInput['spaceRequested'] | null>(null);
   const [offering, setOffering] = useState<VendorProfileInput['offering'] | null>(null);
   const [productsAndServices, setProductsAndServices] = useState('');
   const [facebookName, setFacebookName] = useState('');
@@ -52,7 +44,6 @@ export function VendorProfileScreen({ onBack }: { onBack?: () => void }) {
         setBusinessName(profile.businessName);
         setPhone(profile.phone);
         setCrosswindsResident(profile.crosswindsResident);
-        setSpaceRequested(profile.spaceRequested);
         setOffering(profile.offering);
         setProductsAndServices(profile.productsAndServices);
         setFacebookName(profile.facebookName ?? '');
@@ -80,10 +71,6 @@ export function VendorProfileScreen({ onBack }: { onBack?: () => void }) {
       setError('Say whether you are a Crosswinds resident.');
       return;
     }
-    if (!spaceRequested) {
-      setError('Choose the space you are requesting.');
-      return;
-    }
     if (!offering) {
       setError('Choose what you will offer.');
       return;
@@ -99,7 +86,6 @@ export function VendorProfileScreen({ onBack }: { onBack?: () => void }) {
         businessName: businessName.trim(),
         phone: phone.trim(),
         crosswindsResident,
-        spaceRequested,
         offering,
         productsAndServices: productsAndServices.trim(),
         facebookName: facebookName.trim() || null,
@@ -163,16 +149,6 @@ export function VendorProfileScreen({ onBack }: { onBack?: () => void }) {
             onPress={() => setCrosswindsResident(false)}
           />
         </View>
-
-        <Text style={styles.label}>Space requested</Text>
-        {SPACE_OPTIONS.map((option) => (
-          <Choice
-            key={option.id}
-            label={option.label}
-            selected={spaceRequested === option.id}
-            onPress={() => setSpaceRequested(option.id)}
-          />
-        ))}
 
         <Text style={styles.label}>What will you offer</Text>
         {OFFERING_OPTIONS.map((option) => (

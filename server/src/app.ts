@@ -5,11 +5,13 @@ import { signSession, verifyIdentityToken, verifySession } from './auth.js';
 import {
   createEvent,
   DatabaseError,
+  getAccount,
   getBoothFee,
   getEvent,
   getOwnedRegistration,
   getUserById,
   getVendorProfile,
+  listAccounts,
   listEvents,
   markRegistrationPaid,
   registerForEvent,
@@ -18,7 +20,7 @@ import {
   unregisterFromEvent,
   upsertUser,
 } from './db.js';
-import { parseVendorProfile, ProfileError } from './profile.js';
+import { parseSpaceRequest, parseVendorProfile, ProfileError } from './profile.js';
 import {
   confirmedPayment,
   createBoothCheckout,
@@ -95,6 +97,13 @@ app.post('/session', async (c) => {
   });
 });
 
+const requireAdmin: MiddlewareHandler<{ Variables: AppVariables }> = async (c, next) => {
+  if (!c.get('user').admin) {
+    throw new HttpError(403, 'Only an administrator can view accounts.');
+  }
+  await next();
+};
+
 const requireProfile: MiddlewareHandler<{ Variables: AppVariables }> = async (c, next) => {
   const user = c.get('user');
   if (!user.admin && !user.profileComplete) {
@@ -109,6 +118,8 @@ app.use('/events', requireUser, requireProfile);
 app.use('/events/*', requireUser, requireProfile);
 app.use('/payments', requireUser, requireProfile);
 app.use('/payments/*', requireUser, requireProfile);
+app.use('/admin', requireUser, requireAdmin);
+app.use('/admin/*', requireUser, requireAdmin);
 
 app.get('/me', (c) => c.json({ user: c.get('user') }));
 
@@ -121,6 +132,19 @@ app.put('/me/profile', async (c) => {
   const profile = parseVendorProfile(await readJson(c));
   const user = await saveVendorProfile(c.get('user').id, profile);
   return c.json({ user });
+});
+
+app.get('/admin/users', async (c) => {
+  const users = await listAccounts();
+  return c.json({ users });
+});
+
+app.get('/admin/users/:id', async (c) => {
+  const account = await getAccount(c.req.param('id'));
+  if (!account) {
+    throw new HttpError(404, 'That account does not exist.');
+  }
+  return c.json({ user: account });
 });
 
 app.get('/events', async (c) => {
@@ -148,7 +172,9 @@ app.get('/events/:id', async (c) => {
 });
 
 app.post('/events/:id/registrations', async (c) => {
-  await registerForEvent(c.req.param('id'), c.get('user').id);
+  const body = await readJson(c);
+  const spaceRequested = parseSpaceRequest(body.spaceRequested);
+  await registerForEvent(c.req.param('id'), c.get('user').id, spaceRequested);
   const result = await getEvent(c.req.param('id'), c.get('user'));
   if (!result) {
     throw new HttpError(404, 'That event does not exist.');

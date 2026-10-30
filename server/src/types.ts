@@ -18,7 +18,6 @@ export type CurrentUser = {
   profileComplete: boolean;
 };
 
-export type SpaceRequest = 'grass-generator' | 'grass' | 'food-truck' | 'pavilion';
 export type Offering = 'retail' | 'food' | 'service' | 'group' | 'entertainment';
 
 export type VendorProfileInput = {
@@ -27,11 +26,12 @@ export type VendorProfileInput = {
   businessName: string;
   phone: string;
   crosswindsResident: boolean;
-  spaceRequested: SpaceRequest;
   offering: Offering;
   productsAndServices: string;
   facebookName: string | null;
 };
+
+export type SpaceRequest = 'grass-generator' | 'grass' | 'food-truck' | 'pavilion';
 
 export type EventInput = {
   title: string;
@@ -48,12 +48,37 @@ export type EventRecord = EventInput & {
   registered: boolean;
   paid: boolean;
   feeCents: number | null;
+  spaceRequested: string | null;
   createdAt: string;
 };
 
 export type RegistrationRecord = {
   id: string;
+  userId: string | null;
   name: string;
   email: string | null;
+  paid: boolean | null;
+  amountCents: number | null;
+  spaceRequested: string | null;
+  createdAt: string;
+};
+
+export type AccountSummary = {
+  id: string;
+  name: string;
+  email: string;
+  businessName: string | null;
+  profileComplete: boolean;
+};
+
+export type AccountDetail = AccountSummary & {
+  provider: ProviderName;
+  venmo: string | null;
+  contactPerson: string | null;
+  phone: string | null;
+  crosswindsResident: boolean | null;
+  offering: string | null;
+  productsAndServices: string | null;
+  facebookName: string | null;
   createdAt: string;
 };
