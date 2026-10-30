@@ -26,6 +26,7 @@ import {
 import { useAuth } from '../auth/AuthProvider';
 import { AccountDetailView, AccountList } from './UsersScreen';
 import { colors, pointer, serif } from '../theme';
+import { DateTimeInput } from './DateTimeInput';
 
 const SPACE_OPTIONS = [
   { id: 'grass-generator', label: '10x10 grass plus generator' },
@@ -556,7 +557,7 @@ function CreateEvent({
       return;
     }
     if (!startsAt) {
-      setError('Use a start date like 2026-11-14 and a time like 09:00.');
+      setError('Choose a start date and start time.');
       return;
     }
     const endsAt = endDate || endTime ? combineDateTime(endDate, endTime || '00:00') : null;
@@ -607,8 +608,8 @@ function CreateEvent({
         <Field label="Title" value={title} onChangeText={setTitle} />
         <Field label="Description" value={description} onChangeText={setDescription} multiline />
         <Field label="Location" value={location} onChangeText={setLocation} />
-        <Field label="Start date" value={date} onChangeText={setDate} placeholder="2026-11-14" />
-        <Field label="Start time" value={time} onChangeText={setTime} placeholder="09:00" />
+        <DateTimeInput label="Start date" mode="date" value={date} onChange={setDate} />
+        <DateTimeInput label="Start time" mode="time" value={time} onChange={setTime} />
         <Field label="End date" value={endDate} onChangeText={setEndDate} placeholder="Optional" />
         <Field label="End time" value={endTime} onChangeText={setEndTime} placeholder="Optional" />
         <Field label="Capacity" value={capacity} onChangeText={setCapacity} placeholder="Optional" />

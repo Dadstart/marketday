@@ -45,5 +45,5 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     favicon: './assets/favicon.png',
     bundler: 'metro',
   },
-  plugins: ['expo-web-browser', 'expo-secure-store'],
+  plugins: ['expo-web-browser', 'expo-secure-store', '@react-native-community/datetimepicker'],
 });

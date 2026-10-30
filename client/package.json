@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "main": "index.ts",
   "dependencies": {
+    "@react-native-community/datetimepicker": "9.2.1",
     "expo": "~58.0.21",
     "expo-auth-session": "~58.0.16",
     "expo-crypto": "~58.0.7",
