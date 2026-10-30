@@ -1,5 +1,5 @@
 import * as WebBrowser from 'expo-web-browser';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Platform,
@@ -9,6 +9,7 @@ import {
   Text,
   TextInput,
   View,
+  type TextStyle,
 } from 'react-native';
 
 import {
@@ -25,10 +26,12 @@ import {
   type EventSummary,
 } from '../api/client';
 import { useAuth } from '../auth/AuthProvider';
+import { descriptionForEditor } from '../description';
 import { Logo } from '../Logo';
 import { AccountDetailView, AccountList } from './UsersScreen';
 import { colors, pointer, serif } from '../theme';
 import { DateTimeInput } from './DateTimeInput';
+import { FormattedText } from './FormattedText';
 
 const SPACE_OPTIONS = [
   { id: 'grass-generator', label: '10x10 grass plus generator' },
@@ -379,7 +382,7 @@ function EventDetailView({
             <Text style={styles.body}>{formatWhen(event.startsAt)}</Text>
             {event.endsAt ? <Text style={styles.muted}>Until {formatWhen(event.endsAt)}</Text> : null}
             {event.location ? <Text style={styles.body}>{event.location}</Text> : null}
-            {event.description ? <Text style={styles.body}>{event.description}</Text> : null}
+            {event.description ? <FormattedText value={event.description} style={styles.body} /> : null}
             <Text style={styles.meta}>{registrationLabel(event)}</Text>
             <Text style={styles.body}>{feeLabel(event)}</Text>
             <Text style={styles.body}>
@@ -564,7 +567,11 @@ function EventForm({
   const start = splitDateTime(event?.startsAt);
   const end = splitDateTime(event?.endsAt);
   const [title, setTitle] = useState(event?.title ?? '');
-  const [description, setDescription] = useState(event?.description ?? '');
+  const [description, setDescription] = useState(() => descriptionForEditor(event?.description ?? ''));
+  const [fontSize, setFontSize] = useState('18');
+  const selection = useRef({ start: 0, end: 0 });
+  const frozenSelection = useRef<{ start: number; end: number } | null>(null);
+  const [caret, setCaret] = useState<{ start: number; end: number } | null>(null);
   const [location, setLocation] = useState(event?.location ?? '');
   const [date, setDate] = useState(start.date);
   const [time, setTime] = useState(start.time);
@@ -626,6 +633,32 @@ function EventForm({
     }
   }
 
+  function applyWrap(open: string, close: string) {
+    if (frozenSelection.current) {
+      selection.current = frozenSelection.current;
+      frozenSelection.current = null;
+    }
+    const start = Math.min(selection.current.start, selection.current.end);
+    const end = Math.max(selection.current.start, selection.current.end);
+    const from = Math.max(0, Math.min(start, description.length));
+    const to = Math.max(from, Math.min(end, description.length));
+    const next = `${description.slice(0, from)}${open}${description.slice(from, to)}${close}${description.slice(to)}`;
+    const cursor = from + open.length + (to - from);
+    selection.current = { start: cursor, end: cursor };
+    setCaret({ start: cursor, end: cursor });
+    setDescription(next);
+  }
+
+  function applyFontSize() {
+    const size = Number(fontSize);
+    if (!Number.isInteger(size) || size < 12 || size > 48) {
+      setError('Font size must be a whole number from 12 to 48.');
+      return;
+    }
+    setError(null);
+    applyWrap(`<span style="font-size: ${size}px">`, '</span>');
+  }
+
   return (
     <ScrollView style={styles.flex} contentContainerStyle={styles.content}>
       <View style={styles.column}>
@@ -637,7 +670,58 @@ function EventForm({
         </Text>
         {error ? <ErrorText message={error} /> : null}
         <Field label="Title" value={title} onChangeText={setTitle} />
-        <Field label="Description" value={description} onChangeText={setDescription} multiline />
+        <View style={styles.field}>
+          <Text style={styles.label}>Description</Text>
+          <Text style={styles.muted}>
+            Select text, then apply bold, italic, underline, or a font size from 12 to 48. You can also type {'<b>'},{' '}
+            {'<i>'}, {'<u>'}, and {'<span style="font-size: 18px">'}. Email addresses are shown as links.
+          </Text>
+          <View style={styles.formatRow}>
+            <FormatButton label="Bold" textStyle={styles.boldSample} onPress={() => applyWrap('<b>', '</b>')} />
+            <FormatButton label="Italic" textStyle={styles.italicSample} onPress={() => applyWrap('<i>', '</i>')} />
+            <FormatButton
+              label="Underline"
+              textStyle={styles.underlineSample}
+              onPress={() => applyWrap('<u>', '</u>')}
+            />
+            <TextInput
+              accessibilityLabel="Font size"
+              value={fontSize}
+              onChangeText={setFontSize}
+              keyboardType="number-pad"
+              {...(Platform.OS === 'web'
+                ? {
+                    onMouseDown: () => {
+                      frozenSelection.current = { ...selection.current };
+                    },
+                  }
+                : {})}
+              style={styles.fontSizeInput}
+            />
+            <FormatButton label="Apply size" onPress={applyFontSize} />
+          </View>
+          <TextInput
+            accessibilityLabel="Description"
+            value={description}
+            onChangeText={(value) => {
+              setCaret(null);
+              setDescription(value);
+            }}
+            onSelectionChange={(event) => {
+              selection.current = event.nativeEvent.selection;
+            }}
+            multiline
+            placeholderTextColor={colors.muted}
+            style={[styles.input, styles.inputMultiline, styles.descriptionInput]}
+            {...(caret ? { selection: caret } : {})}
+          />
+          {description.trim() ? (
+            <View style={styles.preview}>
+              <Text style={styles.label}>Preview</Text>
+              <FormattedText value={description} style={styles.body} />
+            </View>
+          ) : null}
+        </View>
         <Field label="Location" value={location} onChangeText={setLocation} />
         <DateTimeInput label="Start date" mode="date" value={date} onChange={setDate} />
         <DateTimeInput label="Start time" mode="time" value={time} onChange={setTime} />
@@ -680,6 +764,34 @@ function EventForm({
         </Pressable>
       </View>
     </ScrollView>
+  );
+}
+
+function FormatButton({
+  label,
+  onPress,
+  textStyle,
+}: {
+  label: string;
+  onPress: () => void;
+  textStyle?: TextStyle;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      {...(Platform.OS === 'web'
+        ? {
+            onMouseDown: (event: { preventDefault: () => void }) => {
+              event.preventDefault();
+            },
+          }
+        : {})}
+      style={({ pressed }) => [styles.formatButton, pressed && styles.pressed, pointer]}
+    >
+      <Text style={[styles.formatLabel, textStyle]}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -994,5 +1106,49 @@ const styles = StyleSheet.create({
   inputMultiline: {
     minHeight: 96,
     textAlignVertical: 'top',
+  },
+  descriptionInput: {
+    minHeight: 140,
+  },
+  formatRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 8,
+  },
+  formatButton: {
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.card,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  formatLabel: {
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  boldSample: { fontWeight: '700' },
+  italicSample: { fontStyle: 'italic' },
+  underlineSample: { textDecorationLine: 'underline' },
+  fontSizeInput: {
+    width: 64,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    fontSize: 14,
+    color: colors.ink,
+  },
+  preview: {
+    backgroundColor: colors.card,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.line,
+    padding: 12,
+    gap: 6,
   },
 });

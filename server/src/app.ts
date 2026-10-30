@@ -22,6 +22,7 @@ import {
   updateEvent,
   upsertUser,
 } from './db.js';
+import { sanitizeDescription } from '../../client/src/description.js';
 import { parseAvailableSpaces, parseSpaceRequest, parseVendorProfile, ProfileError } from './profile.js';
 import {
   confirmedPayment,
@@ -384,7 +385,7 @@ async function readJson(c: { req: { json: () => Promise<unknown> } }): Promise<R
 
 function parseEventInput(body: Record<string, unknown>): EventInput {
   const title = boundedText(body.title, 'A title is required.', 120);
-  const description = boundedText(body.description ?? '', '', 4000);
+  const description = sanitizeDescription(boundedText(body.description ?? '', '', 4000));
   const location = boundedText(body.location ?? '', '', 200);
   const startsAt = requiredDate(body.startsAt, 'A start time is required.');
   const endsAt = optionalDate(body.endsAt, 'The end time is not a valid date.');
