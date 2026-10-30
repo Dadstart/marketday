@@ -585,7 +585,7 @@ function EventForm({
     }
     const endsAt = endDate || endTime ? combineDateTime(endDate, endTime || '00:00') : null;
     if ((endDate || endTime) && !endsAt) {
-      setError('Use an end date like 2026-11-14 and a time like 12:00.');
+      setError('Choose both an end date and an end time, or leave both empty.');
       return;
     }
     const parsedCapacity = capacity.trim() ? Number(capacity) : null;
@@ -639,8 +639,8 @@ function EventForm({
         <Field label="Location" value={location} onChangeText={setLocation} />
         <DateTimeInput label="Start date" mode="date" value={date} onChange={setDate} />
         <DateTimeInput label="Start time" mode="time" value={time} onChange={setTime} />
-        <Field label="End date" value={endDate} onChangeText={setEndDate} placeholder="Optional" />
-        <Field label="End time" value={endTime} onChangeText={setEndTime} placeholder="Optional" />
+        <DateTimeInput label="End date (optional)" mode="date" value={endDate} onChange={setEndDate} />
+        <DateTimeInput label="End time (optional)" mode="time" value={endTime} onChange={setEndTime} />
         <Field label="Capacity" value={capacity} onChangeText={setCapacity} placeholder="Optional" />
         <Text style={styles.label}>Spaces available</Text>
         {SPACE_OPTIONS.map((option) => {
