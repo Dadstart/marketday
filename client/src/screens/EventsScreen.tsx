@@ -26,7 +26,7 @@ type Screen =
   | { name: 'detail'; id: string }
   | { name: 'create' };
 
-export function EventsScreen() {
+export function EventsScreen({ onEditProfile }: { onEditProfile: () => void }) {
   const { token, user, signOut } = useAuth();
   const [screen, setScreen] = useState<Screen>({ name: 'list' });
 
@@ -44,9 +44,14 @@ export function EventsScreen() {
             {user.admin ? ' · Administrator' : ''}
           </Text>
         </View>
-        <Pressable accessibilityRole="button" onPress={signOut} style={pointer}>
-          <Text style={styles.signOut}>Sign out</Text>
-        </Pressable>
+        <View style={styles.headerActions}>
+          <Pressable accessibilityRole="button" onPress={onEditProfile} style={pointer}>
+            <Text style={styles.signOut}>Profile</Text>
+          </Pressable>
+          <Pressable accessibilityRole="button" onPress={signOut} style={pointer}>
+            <Text style={styles.signOut}>Sign out</Text>
+          </Pressable>
+        </View>
       </View>
       {screen.name === 'list' ? (
         <EventList
@@ -409,6 +414,11 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   headerText: { flex: 1 },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
   eyebrow: {
     color: colors.muted,
     fontSize: 12,

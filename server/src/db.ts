@@ -111,6 +111,33 @@ export async function saveVendorProfile(userId: string, input: VendorProfileInpu
   return toCurrentUser(data as UserRow);
 }
 
+const profileColumns =
+  'venmo, contact_person, business_name, phone, crosswinds_resident, space_requested, offering, products_and_services, facebook_name, profile_completed_at';
+
+type ProfileRow = {
+  venmo: string | null;
+  contact_person: string | null;
+  business_name: string | null;
+  phone: string | null;
+  crosswinds_resident: boolean | null;
+  space_requested: string | null;
+  offering: string | null;
+  products_and_services: string | null;
+  facebook_name: string | null;
+  profile_completed_at: string | null;
+};
+
+const spaces = new Set(['grass-generator', 'grass', 'food-truck', 'pavilion']);
+const offerings = new Set(['retail', 'food', 'service', 'group', 'entertainment']);
+
+export async function getVendorProfile(userId: string): Promise<VendorProfileInput | null> {
+  const { data, error } = await supabase.from('users').select(profileColumns).eq('id', userId).maybeSingle();
+  if (error) {
+    throw databaseFailure(error.message);
+  }
+  return data ? toVendorProfile(data as ProfileRow) : null;
+}
+
 export async function listEvents(userId: string): Promise<EventRecord[]> {
   const [events, registrations] = await Promise.all([
     selectEvents(),
@@ -259,6 +286,36 @@ async function selectRegistrations(): Promise<RegistrationRow[]> {
     throw databaseFailure(error.message);
   }
   return (data ?? []) as RegistrationRow[];
+}
+
+function toVendorProfile(row: ProfileRow): VendorProfileInput | null {
+  if (
+    row.profile_completed_at == null ||
+    !row.venmo ||
+    !row.contact_person ||
+    !row.business_name ||
+    !row.phone ||
+    typeof row.crosswinds_resident !== 'boolean' ||
+    !row.space_requested ||
+    !spaces.has(row.space_requested) ||
+    !row.offering ||
+    !offerings.has(row.offering) ||
+    !row.products_and_services
+  ) {
+    return null;
+  }
+
+  return {
+    venmo: row.venmo,
+    contactPerson: row.contact_person,
+    businessName: row.business_name,
+    phone: row.phone,
+    crosswindsResident: row.crosswinds_resident,
+    spaceRequested: row.space_requested as VendorProfileInput['spaceRequested'],
+    offering: row.offering as VendorProfileInput['offering'],
+    productsAndServices: row.products_and_services,
+    facebookName: row.facebook_name,
+  };
 }
 
 function toCurrentUser(row: UserRow): CurrentUser {

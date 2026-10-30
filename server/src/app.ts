@@ -7,6 +7,7 @@ import {
   DatabaseError,
   getEvent,
   getUserById,
+  getVendorProfile,
   listEvents,
   registerForEvent,
   saveVendorProfile,
@@ -97,6 +98,11 @@ app.use('/events', requireUser, requireProfile);
 app.use('/events/*', requireUser, requireProfile);
 
 app.get('/me', (c) => c.json({ user: c.get('user') }));
+
+app.get('/me/profile', async (c) => {
+  const profile = await getVendorProfile(c.get('user').id);
+  return c.json({ profile });
+});
 
 app.put('/me/profile', async (c) => {
   const profile = parseVendorProfile(await readJson(c));

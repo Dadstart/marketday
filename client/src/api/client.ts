@@ -76,6 +76,11 @@ export async function fetchMe(token: string): Promise<SessionUser> {
   return normalizeUser(body.user);
 }
 
+export async function fetchVendorProfile(token: string): Promise<VendorProfileInput | null> {
+  const body = await request<{ profile: VendorProfileInput | null }>('/me/profile', token);
+  return body.profile;
+}
+
 export async function saveVendorProfile(
   token: string,
   profile: VendorProfileInput,

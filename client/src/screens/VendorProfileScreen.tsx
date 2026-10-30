@@ -1,7 +1,7 @@
-import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { saveVendorProfile, type VendorProfileInput } from '../api/client';
+import { fetchVendorProfile, saveVendorProfile, type VendorProfileInput } from '../api/client';
 import { useAuth } from '../auth/AuthProvider';
 import { colors, pointer, serif } from '../theme';
 
@@ -20,7 +20,8 @@ const OFFERING_OPTIONS = [
   { id: 'entertainment', label: 'Entertainment' },
 ] as const;
 
-export function VendorProfileScreen() {
+export function VendorProfileScreen({ onBack }: { onBack?: () => void }) {
+  const editing = onBack != null;
   const { token, updateUser, signOut } = useAuth();
   const [venmo, setVenmo] = useState('');
   const [contactPerson, setContactPerson] = useState('');
@@ -32,7 +33,44 @@ export function VendorProfileScreen() {
   const [productsAndServices, setProductsAndServices] = useState('');
   const [facebookName, setFacebookName] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(editing);
+
+  useEffect(() => {
+    if (!editing || !token) {
+      return;
+    }
+    let active = true;
+    fetchVendorProfile(token)
+      .then((profile) => {
+        if (!active || !profile) {
+          return;
+        }
+        setVenmo(profile.venmo);
+        setContactPerson(profile.contactPerson);
+        setBusinessName(profile.businessName);
+        setPhone(profile.phone);
+        setCrosswindsResident(profile.crosswindsResident);
+        setSpaceRequested(profile.spaceRequested);
+        setOffering(profile.offering);
+        setProductsAndServices(profile.productsAndServices);
+        setFacebookName(profile.facebookName ?? '');
+      })
+      .catch((reason: unknown) => {
+        if (active) {
+          setError(reason instanceof Error && reason.message ? reason.message : 'The profile could not be loaded.');
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [editing, token]);
 
   async function submit() {
     if (!token) {
@@ -53,6 +91,7 @@ export function VendorProfileScreen() {
 
     setBusy(true);
     setError(null);
+    setSaved(false);
     try {
       const result = await saveVendorProfile(token, {
         venmo: venmo.trim(),
@@ -66,6 +105,7 @@ export function VendorProfileScreen() {
         facebookName: facebookName.trim() || null,
       });
       updateUser(result.user);
+      setSaved(true);
     } catch (reason) {
       setError(reason instanceof Error && reason.message ? reason.message : 'The profile could not be saved.');
     } finally {
@@ -82,14 +122,24 @@ export function VendorProfileScreen() {
             <Text style={styles.signOut}>Sign out</Text>
           </Pressable>
         </View>
+        {onBack ? (
+          <Pressable accessibilityRole="button" onPress={onBack} style={pointer}>
+            <Text style={styles.signOut}>Events</Text>
+          </Pressable>
+        ) : null}
         <Text style={styles.title} accessibilityRole="header">
-          Tell us about your business
+          {editing ? 'Your profile' : 'Tell us about your business'}
         </Text>
         <Text style={styles.intro}>
-          We need these details the first time you sign in, before you can register for a market.
+          {editing
+            ? 'Update the business details used for your market registration.'
+            : 'We need these details the first time you sign in, before you can register for a market.'}
         </Text>
         {error ? <Text style={styles.error}>{error}</Text> : null}
-
+        {saved ? <Text style={styles.saved}>Profile saved.</Text> : null}
+        {loading ? <ActivityIndicator color={colors.accent} /> : null}
+        {loading ? null : (
+          <>
         <Field label="Venmo account name or phone number" value={venmo} onChangeText={setVenmo} />
         <Field label="Contact person" value={contactPerson} onChangeText={setContactPerson} />
         <Field label="Name of business" value={businessName} onChangeText={setBusinessName} />
@@ -155,14 +205,16 @@ export function VendorProfileScreen() {
 
         <Pressable
           accessibilityRole="button"
-          disabled={busy}
+          disabled={busy || loading}
           onPress={() => {
             void submit();
           }}
-          style={({ pressed }) => [styles.save, busy && styles.disabled, pressed && styles.pressed, pointer]}
+          style={({ pressed }) => [styles.save, (busy || loading) && styles.disabled, pressed && styles.pressed, pointer]}
         >
-          <Text style={styles.saveLabel}>{busy ? 'Saving…' : 'Save and continue'}</Text>
+          <Text style={styles.saveLabel}>{busy ? 'Saving…' : editing ? 'Save changes' : 'Save and continue'}</Text>
         </Pressable>
+          </>
+        )}
       </View>
     </ScrollView>
   );
@@ -327,6 +379,13 @@ const styles = StyleSheet.create({
   error: {
     color: colors.danger,
     backgroundColor: colors.dangerBackground,
+    borderRadius: 12,
+    padding: 12,
+    overflow: 'hidden',
+  },
+  saved: {
+    color: '#245C32',
+    backgroundColor: '#E4EFE4',
     borderRadius: 12,
     padding: 12,
     overflow: 'hidden',
