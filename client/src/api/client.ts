@@ -24,6 +24,7 @@ export type EventSummary = {
   paid: boolean;
   feeCents: number | null;
   spaceRequested: string | null;
+  spacesAvailable: ('grass-generator' | 'grass' | 'food-truck' | 'pavilion')[];
   createdAt: string;
 };
 
@@ -70,6 +71,7 @@ export type EventDraft = {
   startsAt: string;
   endsAt: string | null;
   capacity: number | null;
+  spacesAvailable: ('grass-generator' | 'grass' | 'food-truck' | 'pavilion')[];
 };
 
 export type VendorProfileInput = {

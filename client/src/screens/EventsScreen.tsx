@@ -261,6 +261,8 @@ function EventDetailView({
   }, [load]);
 
   const event = detail?.event;
+  const availableSpaces = SPACE_OPTIONS.filter((option) => event?.spacesAvailable.includes(option.id));
+  const selectedSpace = availableSpaces.some((option) => option.id === spaceRequested) ? spaceRequested : null;
   const full = event?.capacity != null && event.registrationCount >= event.capacity && !event.registered;
 
   async function pay() {
@@ -298,7 +300,7 @@ function EventDetailView({
     if (!event) {
       return;
     }
-    if (!event.registered && !spaceRequested) {
+    if (!event.registered && !selectedSpace) {
       setError('Choose the space you are requesting.');
       return;
     }
@@ -307,7 +309,7 @@ function EventDetailView({
     try {
       const next = event.registered
         ? await unregisterFromEvent(token, event.id)
-        : await registerForEvent(token, event.id, spaceRequested as (typeof SPACE_OPTIONS)[number]['id']);
+        : await registerForEvent(token, event.id, selectedSpace as (typeof SPACE_OPTIONS)[number]['id']);
       setDetail(next);
     } catch (reason) {
       setError(messageFrom(reason));
@@ -335,18 +337,24 @@ function EventDetailView({
             {event.description ? <Text style={styles.body}>{event.description}</Text> : null}
             <Text style={styles.meta}>{registrationLabel(event)}</Text>
             <Text style={styles.body}>{feeLabel(event)}</Text>
+            <Text style={styles.body}>
+              Spaces available: {event.spacesAvailable.map((id) => spaceLabel(id)).join(', ') || 'None'}
+            </Text>
             {event.registered ? (
               <Text style={styles.body}>Space requested: {spaceLabel(event.spaceRequested)}</Text>
             ) : (
               <>
                 <Text style={styles.label}>Space requested</Text>
-                {SPACE_OPTIONS.map((option) => (
+                {availableSpaces.length === 0 ? (
+                  <Text style={styles.muted}>No spaces are available for this event.</Text>
+                ) : null}
+                {availableSpaces.map((option) => (
                   <Pressable
                     key={option.id}
                     accessibilityRole="radio"
-                    accessibilityState={{ selected: spaceRequested === option.id }}
+                    accessibilityState={{ selected: selectedSpace === option.id }}
                     onPress={() => setSpaceRequested(option.id)}
-                    style={[styles.choice, spaceRequested === option.id && styles.choiceSelected, pointer]}
+                    style={[styles.choice, selectedSpace === option.id && styles.choiceSelected, pointer]}
                   >
                     <Text style={styles.choiceLabel}>{option.label}</Text>
                   </Pressable>
@@ -367,13 +375,13 @@ function EventDetailView({
             ) : null}
             <Pressable
               accessibilityRole="button"
-              disabled={busy || full || (!event.registered && !spaceRequested)}
+              disabled={busy || full || (!event.registered && !selectedSpace)}
               onPress={() => {
                 void changeRegistration();
               }}
               style={({ pressed }) => [
                 styles.primaryButton,
-                (busy || full || (!event.registered && !spaceRequested)) && styles.disabled,
+                (busy || full || (!event.registered && !selectedSpace)) && styles.disabled,
                 pressed && styles.pressed,
                 pointer,
               ]}
@@ -463,6 +471,7 @@ function CreateEvent({
   const [endDate, setEndDate] = useState('');
   const [endTime, setEndTime] = useState('');
   const [capacity, setCapacity] = useState('');
+  const [spaces, setSpaces] = useState<(typeof SPACE_OPTIONS)[number]['id'][]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -486,6 +495,10 @@ function CreateEvent({
       setError('Capacity must be a whole number greater than zero.');
       return;
     }
+    if (spaces.length === 0) {
+      setError('Choose at least one available space.');
+      return;
+    }
 
     setBusy(true);
     setError(null);
@@ -497,6 +510,7 @@ function CreateEvent({
         startsAt,
         endsAt,
         capacity: parsedCapacity,
+        spacesAvailable: spaces,
       });
       onCreated(result.event.id);
     } catch (reason) {
@@ -524,13 +538,37 @@ function CreateEvent({
         <Field label="End date" value={endDate} onChangeText={setEndDate} placeholder="Optional" />
         <Field label="End time" value={endTime} onChangeText={setEndTime} placeholder="Optional" />
         <Field label="Capacity" value={capacity} onChangeText={setCapacity} placeholder="Optional" />
+        <Text style={styles.label}>Spaces available</Text>
+        {SPACE_OPTIONS.map((option) => {
+          const selected = spaces.includes(option.id);
+          return (
+            <Pressable
+              key={option.id}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: selected }}
+              onPress={() => {
+                setSpaces((current) =>
+                  current.includes(option.id) ? current.filter((id) => id !== option.id) : [...current, option.id],
+                );
+              }}
+              style={[styles.choice, selected && styles.choiceSelected, pointer]}
+            >
+              <Text style={styles.choiceLabel}>{option.label}</Text>
+            </Pressable>
+          );
+        })}
         <Pressable
           accessibilityRole="button"
-          disabled={busy}
+          disabled={busy || spaces.length === 0}
           onPress={() => {
             void submit();
           }}
-          style={({ pressed }) => [styles.primaryButton, busy && styles.disabled, pressed && styles.pressed, pointer]}
+          style={({ pressed }) => [
+            styles.primaryButton,
+            (busy || spaces.length === 0) && styles.disabled,
+            pressed && styles.pressed,
+            pointer,
+          ]}
         >
           <Text style={styles.primaryLabel}>{busy ? 'Saving…' : 'Save event'}</Text>
         </Pressable>

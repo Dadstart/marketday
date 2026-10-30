@@ -37,6 +37,11 @@ type UserRow = {
 const userColumns =
   'id, provider, email, name, picture, profile_completed_at, venmo, contact_person, business_name, phone, crosswinds_resident, offering, products_and_services, facebook_name';
 
+const eventColumns =
+  'id, title, description, location, starts_at, ends_at, capacity, spaces_available, created_at';
+
+const spaceOrder: SpaceRequest[] = ['grass-generator', 'grass', 'food-truck', 'pavilion'];
+
 type EventRow = {
   id: string;
   title: string;
@@ -45,6 +50,7 @@ type EventRow = {
   starts_at: string;
   ends_at: string | null;
   capacity: number | null;
+  spaces_available: string[] | null;
   created_at: string;
 };
 
@@ -443,7 +449,7 @@ export async function getEvent(
 ): Promise<{ event: EventRecord; registrations: RegistrationRecord[] } | null> {
   const { data, error } = await supabase
     .from('events')
-    .select('id, title, description, location, starts_at, ends_at, capacity, created_at')
+    .select(eventColumns)
     .eq('id', eventId)
     .maybeSingle();
 
@@ -507,9 +513,10 @@ export async function createEvent(userId: string, input: EventInput): Promise<Ev
       starts_at: input.startsAt,
       ends_at: input.endsAt,
       capacity: input.capacity,
+      spaces_available: input.spacesAvailable,
       created_by: userId,
     })
-    .select('id, title, description, location, starts_at, ends_at, capacity, created_at')
+    .select(eventColumns)
     .single();
 
   if (error || !data) {
@@ -690,6 +697,9 @@ export async function registerForEvent(
   if (error.message.includes('invalid_space')) {
     throw new DatabaseError(400, 'Choose the space you are requesting.');
   }
+  if (error.message.includes('space_unavailable')) {
+    throw new DatabaseError(400, 'That space is not available for this event.');
+  }
   throw databaseFailure(error.message);
 }
 
@@ -717,7 +727,7 @@ export class DatabaseError extends Error {
 async function selectEvents(): Promise<EventRow[]> {
   const { data, error } = await supabase
     .from('events')
-    .select('id, title, description, location, starts_at, ends_at, capacity, created_at')
+    .select(eventColumns)
     .order('starts_at', { ascending: true });
 
   if (error) {
@@ -805,8 +815,14 @@ function toEventRecord(
     paid: registered && paid,
     feeCents,
     spaceRequested: registered ? spaceRequested : null,
+    spacesAvailable: spacesAvailable(row.spaces_available),
     createdAt: row.created_at,
   };
+}
+
+function spacesAvailable(values: string[] | null): SpaceRequest[] {
+  const present = new Set(values ?? []);
+  return spaceOrder.filter((space) => present.has(space));
 }
 
 function databaseFailure(message: string | undefined): DatabaseError {

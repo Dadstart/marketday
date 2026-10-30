@@ -20,7 +20,7 @@ import {
   unregisterFromEvent,
   upsertUser,
 } from './db.js';
-import { parseSpaceRequest, parseVendorProfile, ProfileError } from './profile.js';
+import { parseAvailableSpaces, parseSpaceRequest, parseVendorProfile, ProfileError } from './profile.js';
 import {
   confirmedPayment,
   createBoothCheckout,
@@ -370,6 +370,7 @@ function parseEventInput(body: Record<string, unknown>): EventInput {
     startsAt,
     endsAt,
     capacity: optionalCapacity(body.capacity),
+    spacesAvailable: parseAvailableSpaces(body.spacesAvailable),
   };
 }
 

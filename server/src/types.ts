@@ -51,6 +51,7 @@ export type EventInput = {
   startsAt: string;
   endsAt: string | null;
   capacity: number | null;
+  spacesAvailable: SpaceRequest[];
 };
 
 export type EventRecord = EventInput & {

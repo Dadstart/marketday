@@ -10,6 +10,22 @@ export function parseSpaceRequest(value: unknown): SpaceRequest {
   return value;
 }
 
+export function parseAvailableSpaces(value: unknown): SpaceRequest[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new ProfileError('Choose at least one available space.');
+  }
+  const spaces: SpaceRequest[] = [];
+  for (const item of value) {
+    if (!isSpace(item)) {
+      throw new ProfileError('Choose a space from the list.');
+    }
+    if (!spaces.includes(item)) {
+      spaces.push(item);
+    }
+  }
+  return spaces;
+}
+
 export function parseVendorProfile(body: Record<string, unknown>): VendorProfileInput {
   const offering = body.offering;
   if (!isOffering(offering)) {

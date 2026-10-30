@@ -35,10 +35,15 @@ create table public.events (
   starts_at timestamptz not null,
   ends_at timestamptz,
   capacity integer check (capacity is null or capacity > 0),
+  spaces_available text[] not null,
   created_by uuid not null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  constraint events_created_by_fkey foreign key (created_by) references public.users (id)
+  constraint events_created_by_fkey foreign key (created_by) references public.users (id),
+  constraint events_spaces_available_check check (
+    cardinality(spaces_available) > 0
+    and spaces_available <@ array['grass-generator', 'grass', 'food-truck', 'pavilion']::text[]
+  )
 );
 
 create table public.registrations (
@@ -77,9 +82,10 @@ as $$
 declare
   existing_registration public.registrations;
   event_capacity integer;
+  event_spaces text[];
   registration_count integer;
 begin
-  select capacity into event_capacity
+  select capacity, spaces_available into event_capacity, event_spaces
   from public.events
   where id = p_event_id
   for update;
@@ -98,6 +104,10 @@ begin
 
   if found then
     return existing_registration;
+  end if;
+
+  if not (p_space_requested = any(event_spaces)) then
+    raise exception 'space_unavailable';
   end if;
 
   if event_capacity is not null then
