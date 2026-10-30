@@ -92,6 +92,10 @@ export function VendorProfileScreen({ onBack }: { onBack?: () => void }) {
         facebookName: facebookName.trim() || null,
       });
       updateUser(result.user);
+      if (onBack) {
+        onBack();
+        return;
+      }
       setSaved(true);
     } catch (reason) {
       setError(reason instanceof Error && reason.message ? reason.message : 'The profile could not be saved.');

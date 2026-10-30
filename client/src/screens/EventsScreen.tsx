@@ -341,14 +341,12 @@ function EventDetailView({
     setBusy(true);
     setError(null);
     try {
-      const next = canceling
-        ? await unregisterFromEvent(token, event.id)
-        : await registerForEvent(token, event.id, selectedSpace as (typeof SPACE_OPTIONS)[number]['id']);
       if (canceling) {
-        onBack();
-        return;
+        await unregisterFromEvent(token, event.id);
+      } else {
+        await registerForEvent(token, event.id, selectedSpace as (typeof SPACE_OPTIONS)[number]['id']);
       }
-      setDetail(next);
+      onBack();
     } catch (reason) {
       setError(messageFrom(reason));
     } finally {
