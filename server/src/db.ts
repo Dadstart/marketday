@@ -2,6 +2,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 import { isAdminEmail } from './admins.js';
 import { supabaseServiceRoleKey, supabaseUrl } from './env.js';
+import { feeCents } from './fees.js';
 import type {
   CurrentUser,
   EventInput,
@@ -39,13 +40,26 @@ type RegistrationRow = {
   event_id: string;
   user_id: string;
   created_at: string;
+  paid_at: string | null;
 };
 
 type RegistrantRow = {
   id: string;
   user_id: string;
   created_at: string;
+  paid_at: string | null;
   users: { name: string; email: string } | { name: string; email: string }[] | null;
+};
+
+export type OwnedRegistration = {
+  id: string;
+  paidAt: string | null;
+  stripeCheckoutSessionId: string | null;
+};
+
+export type BoothFee = {
+  cents: number;
+  resident: boolean;
 };
 
 const supabase: SupabaseClient = createClient(supabaseUrl, supabaseServiceRoleKey, {
@@ -139,21 +153,34 @@ export async function getVendorProfile(userId: string): Promise<VendorProfileInp
 }
 
 export async function listEvents(userId: string): Promise<EventRecord[]> {
-  const [events, registrations] = await Promise.all([
+  const [events, registrations, boothFee] = await Promise.all([
     selectEvents(),
     selectRegistrations(),
+    getBoothFee(userId),
   ]);
   const counts = new Map<string, number>();
   const mine = new Set<string>();
+  const paid = new Set<string>();
 
   for (const registration of registrations) {
     counts.set(registration.event_id, (counts.get(registration.event_id) ?? 0) + 1);
     if (registration.user_id === userId) {
       mine.add(registration.event_id);
+      if (registration.paid_at) {
+        paid.add(registration.event_id);
+      }
     }
   }
 
-  return events.map((event) => toEventRecord(event, counts.get(event.id) ?? 0, mine.has(event.id)));
+  return events.map((event) =>
+    toEventRecord(
+      event,
+      counts.get(event.id) ?? 0,
+      mine.has(event.id),
+      paid.has(event.id),
+      boothFee?.cents ?? null,
+    ),
+  );
 }
 
 export async function getEvent(
@@ -175,7 +202,7 @@ export async function getEvent(
 
   const { data: registrationRows, error: registrationError } = await supabase
     .from('registrations')
-    .select('id, user_id, created_at, users(name, email)')
+    .select('id, user_id, created_at, paid_at, users(name, email)')
     .eq('event_id', eventId)
     .order('created_at', { ascending: true });
 
@@ -196,11 +223,16 @@ export async function getEvent(
     };
   });
 
+  const mine = rows.find((row) => row.user_id === user.id);
+  const boothFee = await getBoothFee(user.id);
+
   return {
     event: toEventRecord(
       data as EventRow,
       registrations.length,
-      rows.some((row) => row.user_id === user.id),
+      mine != null,
+      mine?.paid_at != null,
+      boothFee?.cents ?? null,
     ),
     registrations,
   };
@@ -225,7 +257,76 @@ export async function createEvent(userId: string, input: EventInput): Promise<Ev
     throw databaseFailure(error?.message);
   }
 
-  return toEventRecord(data as EventRow, 0, false);
+  const boothFee = await getBoothFee(userId);
+  return toEventRecord(data as EventRow, 0, false, false, boothFee?.cents ?? null);
+}
+
+export async function getBoothFee(userId: string): Promise<BoothFee | null> {
+  const { data, error } = await supabase
+    .from('users')
+    .select('crosswinds_resident, profile_completed_at')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (error) {
+    throw databaseFailure(error.message);
+  }
+  if (!data?.profile_completed_at || typeof data.crosswinds_resident !== 'boolean') {
+    return null;
+  }
+  return { cents: feeCents(data.crosswinds_resident), resident: data.crosswinds_resident };
+}
+
+export async function getOwnedRegistration(eventId: string, userId: string): Promise<OwnedRegistration | null> {
+  const { data, error } = await supabase
+    .from('registrations')
+    .select('id, paid_at, stripe_checkout_session_id')
+    .eq('event_id', eventId)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (error) {
+    throw databaseFailure(error.message);
+  }
+  if (!data) {
+    return null;
+  }
+  return {
+    id: data.id as string,
+    paidAt: (data.paid_at as string | null) ?? null,
+    stripeCheckoutSessionId: (data.stripe_checkout_session_id as string | null) ?? null,
+  };
+}
+
+export async function saveCheckoutSession(registrationId: string, sessionId: string): Promise<void> {
+  const { error } = await supabase
+    .from('registrations')
+    .update({ stripe_checkout_session_id: sessionId })
+    .eq('id', registrationId);
+
+  if (error) {
+    throw databaseFailure(error.message);
+  }
+}
+
+export async function markRegistrationPaid(
+  registrationId: string,
+  amountCents: number,
+  sessionId: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from('registrations')
+    .update({
+      paid_at: new Date().toISOString(),
+      amount_cents: amountCents,
+      stripe_checkout_session_id: sessionId,
+    })
+    .eq('id', registrationId)
+    .is('paid_at', null);
+
+  if (error) {
+    throw databaseFailure(error.message);
+  }
 }
 
 export async function registerForEvent(eventId: string, userId: string): Promise<void> {
@@ -281,7 +382,9 @@ async function selectEvents(): Promise<EventRow[]> {
 }
 
 async function selectRegistrations(): Promise<RegistrationRow[]> {
-  const { data, error } = await supabase.from('registrations').select('id, event_id, user_id, created_at');
+  const { data, error } = await supabase
+    .from('registrations')
+    .select('id, event_id, user_id, created_at, paid_at');
   if (error) {
     throw databaseFailure(error.message);
   }
@@ -330,7 +433,13 @@ function toCurrentUser(row: UserRow): CurrentUser {
   };
 }
 
-function toEventRecord(row: EventRow, registrationCount: number, registered: boolean): EventRecord {
+function toEventRecord(
+  row: EventRow,
+  registrationCount: number,
+  registered: boolean,
+  paid: boolean,
+  feeCents: number | null,
+): EventRecord {
   return {
     id: row.id,
     title: row.title,
@@ -341,6 +450,8 @@ function toEventRecord(row: EventRow, registrationCount: number, registered: boo
     capacity: row.capacity,
     registrationCount,
     registered,
+    paid: registered && paid,
+    feeCents,
     createdAt: row.created_at,
   };
 }

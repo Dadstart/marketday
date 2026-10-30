@@ -21,6 +21,8 @@ export type EventSummary = {
   capacity: number | null;
   registrationCount: number;
   registered: boolean;
+  paid: boolean;
+  feeCents: number | null;
   createdAt: string;
 };
 
@@ -113,6 +115,27 @@ export function registerForEvent(token: string, eventId: string): Promise<EventD
 
 export function unregisterFromEvent(token: string, eventId: string): Promise<EventDetail> {
   return request(`/events/${eventId}/registrations`, token, { method: 'DELETE' });
+}
+
+export function startEventPayment(
+  token: string,
+  eventId: string,
+  returnUrl: string,
+): Promise<{ url: string | null; paid: boolean }> {
+  return request(`/events/${eventId}/payment`, token, {
+    method: 'POST',
+    body: JSON.stringify({ returnUrl }),
+  });
+}
+
+export function confirmCheckout(
+  token: string,
+  sessionId: string,
+): Promise<{ paid: boolean; eventId: string }> {
+  return request('/payments/confirm', token, {
+    method: 'POST',
+    body: JSON.stringify({ sessionId }),
+  });
 }
 
 export function isUnauthorized(error: unknown): boolean {

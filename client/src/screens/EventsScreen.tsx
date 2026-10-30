@@ -1,6 +1,8 @@
+import * as WebBrowser from 'expo-web-browser';
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -10,10 +12,12 @@ import {
 } from 'react-native';
 
 import {
+  confirmCheckout,
   createEvent,
   fetchEvent,
   fetchEvents,
   registerForEvent,
+  startEventPayment,
   unregisterFromEvent,
   type EventDetail,
   type EventSummary,
@@ -104,6 +108,22 @@ function EventList({
     load();
   }, [load]);
 
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') {
+      return;
+    }
+    const sessionId = new URLSearchParams(window.location.search).get('checkout_session_id');
+    if (!sessionId) {
+      return;
+    }
+    window.history.replaceState({}, '', window.location.pathname);
+    confirmCheckout(token, sessionId)
+      .then(() => load())
+      .catch((reason: unknown) => setError(messageFrom(reason)));
+  }, [load, token]);
+
+  const unpaid = events?.filter((event) => event.registered && !event.paid) ?? [];
+
   return (
     <ScrollView style={styles.flex} contentContainerStyle={styles.content}>
       <View style={styles.column}>
@@ -118,6 +138,17 @@ function EventList({
           ) : null}
         </View>
         {error ? <ErrorText message={error} /> : null}
+        {unpaid.length > 0 ? (
+          <View style={styles.unpaidBanner}>
+            <Text style={styles.unpaidLabel}>
+              {unpaid.length === 1
+                ? `${unpaid[0].title} still needs payment${
+                    unpaid[0].feeCents != null ? ` of ${formatFee(unpaid[0].feeCents)}` : ''
+                  }.`
+                : `${unpaid.length} registrations still need payment.`}
+            </Text>
+          </View>
+        ) : null}
         {events == null && !error ? <ActivityIndicator color={colors.accent} /> : null}
         {events?.length === 0 ? <Text style={styles.muted}>No events yet.</Text> : null}
         {events?.map((event) => (
@@ -125,7 +156,12 @@ function EventList({
             key={event.id}
             accessibilityRole="button"
             onPress={() => onOpen(event.id)}
-            style={({ pressed }) => [styles.eventCard, pressed && styles.pressed, pointer]}
+            style={({ pressed }) => [
+              styles.eventCard,
+              event.registered && !event.paid && styles.unpaidCard,
+              pressed && styles.pressed,
+              pointer,
+            ]}
           >
             <Text style={styles.eventTitle}>{event.title}</Text>
             <Text style={styles.muted}>{formatWhen(event.startsAt)}</Text>
@@ -134,6 +170,12 @@ function EventList({
               {registrationLabel(event)}
               {event.registered ? ' · You are registered' : ''}
             </Text>
+            {event.registered && !event.paid ? (
+              <Text style={styles.unpaidLabel}>
+                {event.feeCents != null ? `Payment due: ${formatFee(event.feeCents)}` : 'Payment due'}
+              </Text>
+            ) : null}
+            {event.registered && event.paid ? <Text style={styles.paidLabel}>Paid</Text> : null}
           </Pressable>
         ))}
       </View>
@@ -167,6 +209,37 @@ function EventDetailView({
 
   const event = detail?.event;
   const full = event?.capacity != null && event.registrationCount >= event.capacity && !event.registered;
+
+  async function pay() {
+    if (!event) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await startEventPayment(token, event.id, paymentReturnUrl());
+      if (result.paid || !result.url) {
+        load();
+        return;
+      }
+      if (Platform.OS === 'web') {
+        window.location.assign(result.url);
+        return;
+      }
+      const browser = await WebBrowser.openAuthSessionAsync(result.url, paymentReturnUrl());
+      if (browser.type === 'success') {
+        const sessionId = new URL(browser.url).searchParams.get('checkout_session_id');
+        if (sessionId) {
+          await confirmCheckout(token, sessionId);
+        }
+        load();
+      }
+    } catch (reason) {
+      setError(messageFrom(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function changeRegistration() {
     if (!event) {
@@ -204,6 +277,17 @@ function EventDetailView({
             {event.location ? <Text style={styles.body}>{event.location}</Text> : null}
             {event.description ? <Text style={styles.body}>{event.description}</Text> : null}
             <Text style={styles.meta}>{registrationLabel(event)}</Text>
+            <Text style={styles.body}>{feeLabel(event)}</Text>
+            {event.registered && event.paid ? <Text style={styles.paidLabel}>Paid</Text> : null}
+            {event.registered && !event.paid ? (
+              <View style={styles.unpaidBanner}>
+                <Text style={styles.unpaidLabel}>
+                  {event.feeCents != null
+                    ? `Payment due: ${formatFee(event.feeCents)}`
+                    : 'Payment due. Add your Crosswinds residency on your profile first.'}
+                </Text>
+              </View>
+            ) : null}
             <Pressable
               accessibilityRole="button"
               disabled={busy || full}
@@ -227,6 +311,25 @@ function EventDetailView({
                       : 'Register'}
               </Text>
             </Pressable>
+            {event.registered && !event.paid ? (
+              <Pressable
+                accessibilityRole="button"
+                disabled={busy || event.feeCents == null}
+                onPress={() => {
+                  void pay();
+                }}
+                style={({ pressed }) => [
+                  styles.primaryButton,
+                  (busy || event.feeCents == null) && styles.disabled,
+                  pressed && styles.pressed,
+                  pointer,
+                ]}
+              >
+                <Text style={styles.primaryLabel}>
+                  {event.feeCents != null ? `Pay ${formatFee(event.feeCents)}` : 'Pay booth fee'}
+                </Text>
+              </Pressable>
+            ) : null}
             <Text style={styles.section}>Registrations</Text>
             {detail?.registrations.length === 0 ? (
               <Text style={styles.muted}>No one has registered yet.</Text>
@@ -371,6 +474,27 @@ function ErrorText({ message }: { message: string }) {
   return <Text style={styles.error}>{message}</Text>;
 }
 
+function formatFee(cents: number): string {
+  return `$${cents / 100}`;
+}
+
+function feeLabel(event: EventSummary): string {
+  if (event.feeCents === 500) {
+    return 'Booth fee: $5 because you are a Crosswinds resident.';
+  }
+  if (event.feeCents === 1000) {
+    return 'Booth fee: $10.';
+  }
+  return 'Booth fee is $5 for Crosswinds residents and $10 otherwise. Add your residency on your profile before paying.';
+}
+
+function paymentReturnUrl(): string {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    return `${window.location.origin}${window.location.pathname}`;
+  }
+  return 'marketday://payment';
+}
+
 function registrationLabel(event: EventSummary): string {
   const count = `${event.registrationCount} registered`;
   if (event.capacity == null) {
@@ -479,6 +603,25 @@ const styles = StyleSheet.create({
     borderColor: colors.line,
     padding: 16,
     gap: 4,
+  },
+  unpaidCard: {
+    borderColor: colors.danger,
+    backgroundColor: colors.dangerBackground,
+  },
+  unpaidBanner: {
+    backgroundColor: colors.dangerBackground,
+    borderRadius: 12,
+    padding: 12,
+  },
+  unpaidLabel: {
+    color: colors.danger,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  paidLabel: {
+    color: '#245C32',
+    fontSize: 15,
+    fontWeight: '700',
   },
   eventTitle: {
     color: colors.ink,

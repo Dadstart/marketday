@@ -5,16 +5,21 @@ import { signSession, verifyIdentityToken, verifySession } from './auth.js';
 import {
   createEvent,
   DatabaseError,
+  getBoothFee,
   getEvent,
+  getOwnedRegistration,
   getUserById,
   getVendorProfile,
   listEvents,
+  markRegistrationPaid,
   registerForEvent,
+  saveCheckoutSession,
   saveVendorProfile,
   unregisterFromEvent,
   upsertUser,
 } from './db.js';
 import { parseVendorProfile, ProfileError } from './profile.js';
+import { confirmedPayment, createBoothCheckout, inspectCheckout, PaymentError } from './stripe.js';
 import type { CurrentUser, EventInput } from './types.js';
 
 type AppVariables = {
@@ -152,10 +157,93 @@ app.delete('/events/:id/registrations', async (c) => {
   return c.json(result);
 });
 
+app.post('/events/:id/payment', async (c) => {
+  const user = c.get('user');
+  const eventId = c.req.param('id');
+  const body = await readJson(c);
+  const returnUrl = parseReturnUrl(body.returnUrl);
+  const result = await getEvent(eventId, user);
+  if (!result) {
+    throw new HttpError(404, 'That event does not exist.');
+  }
+  if (!result.event.registered) {
+    throw new HttpError(400, 'Register for the event before paying.');
+  }
+
+  const registration = await getOwnedRegistration(eventId, user.id);
+  if (!registration) {
+    throw new HttpError(400, 'Register for the event before paying.');
+  }
+  if (registration.paidAt) {
+    return c.json({ url: null, paid: true });
+  }
+
+  const fee = await getBoothFee(user.id);
+  if (!fee) {
+    throw new HttpError(
+      400,
+      'Finish your profile and say whether you are a Crosswinds resident before paying.',
+    );
+  }
+
+  if (registration.stripeCheckoutSessionId) {
+    const existing = await inspectCheckout(registration.stripeCheckoutSessionId);
+    if (existing.kind === 'paid') {
+      await markRegistrationPaid(registration.id, existing.amountCents, registration.stripeCheckoutSessionId);
+      return c.json({ url: null, paid: true });
+    }
+    if (existing.kind === 'open' && existing.amountCents === fee.cents) {
+      return c.json({ url: existing.url, paid: false });
+    }
+  }
+
+  const session = await createBoothCheckout({
+    registrationId: registration.id,
+    userId: user.id,
+    eventId,
+    eventTitle: result.event.title,
+    email: user.email,
+    amountCents: fee.cents,
+    resident: fee.resident,
+    successUrl: withCheckoutPlaceholder(returnUrl),
+    cancelUrl: returnUrl,
+  });
+  await saveCheckoutSession(registration.id, session.id);
+  return c.json({ url: session.url, paid: false });
+});
+
+app.post('/payments/confirm', async (c) => {
+  const user = c.get('user');
+  const body = await readJson(c);
+  const sessionId = body.sessionId;
+  if (typeof sessionId !== 'string' || !sessionId.startsWith('cs_')) {
+    throw new HttpError(400, 'That payment session is not valid.');
+  }
+
+  const payment = await confirmedPayment(sessionId);
+  if (payment.userId !== user.id) {
+    throw new HttpError(403, 'That payment belongs to another account.');
+  }
+
+  const registration = await getOwnedRegistration(payment.eventId, user.id);
+  if (!registration || registration.id !== payment.registrationId) {
+    throw new HttpError(400, 'That payment does not match your registration.');
+  }
+  if (!registration.paidAt) {
+    await markRegistrationPaid(registration.id, payment.amountCents, sessionId);
+  }
+  return c.json({ paid: true, eventId: payment.eventId });
+});
+
 app.notFound((c) => c.json({ error: 'Not found.' }, 404));
 
 app.onError((error, c) => {
-  if (error instanceof HttpError || error instanceof DatabaseError || error instanceof ProfileError) {
+  if (
+    error instanceof HttpError ||
+    error instanceof DatabaseError ||
+    error instanceof ProfileError ||
+    error instanceof PaymentError
+  ) {
     return c.json({ error: error.message }, error.status as 400);
   }
   console.error(error);
@@ -171,6 +259,32 @@ class HttpError extends Error {
   ) {
     super(message);
   }
+}
+
+function parseReturnUrl(value: unknown): string {
+  if (typeof value !== 'string' || value.length > 500) {
+    throw new HttpError(400, 'The payment return address is missing.');
+  }
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new HttpError(400, 'The payment return address is not valid.');
+  }
+  if (url.username || url.password) {
+    throw new HttpError(400, 'The payment return address is not valid.');
+  }
+  const localHttp = url.protocol === 'http:' && (url.hostname === 'localhost' || url.hostname === '127.0.0.1');
+  const appScheme = url.protocol === 'marketday:';
+  if (!localHttp && !appScheme) {
+    throw new HttpError(400, 'The payment return address is not allowed.');
+  }
+  return url.toString();
+}
+
+function withCheckoutPlaceholder(returnUrl: string): string {
+  const joiner = returnUrl.includes('?') ? '&' : '?';
+  return `${returnUrl}${joiner}checkout_session_id={CHECKOUT_SESSION_ID}`;
 }
 
 async function readJson(c: { req: { json: () => Promise<unknown> } }): Promise<Record<string, unknown>> {

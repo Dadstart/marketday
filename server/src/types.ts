@@ -46,6 +46,8 @@ export type EventRecord = EventInput & {
   id: string;
   registrationCount: number;
   registered: boolean;
+  paid: boolean;
+  feeCents: number | null;
   createdAt: string;
 };
 

@@ -46,6 +46,9 @@ create table public.registrations (
   id uuid primary key default gen_random_uuid(),
   event_id uuid not null references public.events (id) on delete cascade,
   user_id uuid not null references public.users (id) on delete cascade,
+  paid_at timestamptz,
+  amount_cents integer check (amount_cents is null or amount_cents in (500, 1000)),
+  stripe_checkout_session_id text,
   created_at timestamptz not null default now(),
   unique (event_id, user_id)
 );

@@ -39,6 +39,7 @@ export const googleClientIds = [
 ].filter((value): value is string => Boolean(value));
 
 export const microsoftClientId = optional('EXPO_PUBLIC_MICROSOFT_CLIENT_ID');
+export const stripeTestSecretKey = optional('STRIPE_TEST_SECRET_KEY');
 
 if (!Number.isInteger(port) || port <= 0) {
   throw new Error('PORT must be a positive integer.');
