@@ -527,6 +527,50 @@ export async function createEvent(userId: string, input: EventInput): Promise<Ev
   return toEventRecord(data as EventRow, 0, false, false, boothFee?.cents ?? null, null);
 }
 
+export async function updateEvent(eventId: string, input: EventInput): Promise<boolean> {
+  const { data: registrations, error: registrationError } = await supabase
+    .from('registrations')
+    .select('space_requested')
+    .eq('event_id', eventId);
+  if (registrationError) {
+    throw databaseFailure(registrationError.message);
+  }
+
+  const rows = registrations ?? [];
+  if (input.capacity != null && rows.length > input.capacity) {
+    throw new DatabaseError(400, 'Capacity cannot be lower than the number of people already registered.');
+  }
+  const offered = new Set<string>(input.spacesAvailable);
+  const requestedSpaceRemoved = rows.some(
+    (row) =>
+      typeof row.space_requested === 'string' &&
+      spaceOrder.includes(row.space_requested as SpaceRequest) &&
+      !offered.has(row.space_requested),
+  );
+  if (requestedSpaceRemoved) {
+    throw new DatabaseError(400, 'Someone is already registered for a space you removed.');
+  }
+
+  const { data, error } = await supabase
+    .from('events')
+    .update({
+      title: input.title,
+      description: input.description,
+      location: input.location,
+      starts_at: input.startsAt,
+      ends_at: input.endsAt,
+      capacity: input.capacity,
+      spaces_available: input.spacesAvailable,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', eventId)
+    .select('id');
+  if (error) {
+    throw databaseFailure(error.message);
+  }
+  return (data ?? []).length > 0;
+}
+
 const accountSummaryColumns =
   'id, name, email, business_name, venmo, contact_person, phone, crosswinds_resident, offering, products_and_services, facebook_name, profile_completed_at';
 const accountDetailColumns =

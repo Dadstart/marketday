@@ -19,6 +19,7 @@ import {
   saveCheckoutSession,
   saveVendorProfile,
   unregisterFromEvent,
+  updateEvent,
   upsertUser,
 } from './db.js';
 import { parseAvailableSpaces, parseSpaceRequest, parseVendorProfile, ProfileError } from './profile.js';
@@ -173,6 +174,22 @@ app.delete('/events/:id', async (c) => {
     throw new HttpError(404, 'That event does not exist.');
   }
   return c.body(null, 204);
+});
+
+app.put('/events/:id', async (c) => {
+  if (!c.get('user').admin) {
+    throw new HttpError(403, 'Only an administrator can edit events.');
+  }
+  const input = parseEventInput(await readJson(c));
+  const updated = await updateEvent(c.req.param('id'), input);
+  if (!updated) {
+    throw new HttpError(404, 'That event does not exist.');
+  }
+  const result = await getEvent(c.req.param('id'), c.get('user'));
+  if (!result) {
+    throw new HttpError(404, 'That event does not exist.');
+  }
+  return c.json(result);
 });
 
 app.get('/events/:id', async (c) => {

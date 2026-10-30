@@ -20,6 +20,7 @@ import {
   registerForEvent,
   startEventPayment,
   unregisterFromEvent,
+  updateEvent,
   type EventDetail,
   type EventSummary,
 } from '../api/client';
@@ -46,6 +47,7 @@ type Screen =
   | { name: 'list' }
   | { name: 'detail'; id: string }
   | { name: 'create' }
+  | { name: 'edit'; event: EventSummary }
   | { name: 'users' }
   | { name: 'account'; id: string; back: 'users' | 'detail'; eventId?: string };
 
@@ -99,6 +101,7 @@ export function EventsScreen({ onEditProfile }: { onEditProfile: () => void }) {
           admin={user.admin}
           eventId={screen.id}
           onBack={() => setScreen({ name: 'list' })}
+          onEdit={(event) => setScreen({ name: 'edit', event })}
           onOpenUser={(id) => setScreen({ name: 'account', id, back: 'detail', eventId: screen.id })}
         />
       ) : null}
@@ -123,10 +126,18 @@ export function EventsScreen({ onEditProfile }: { onEditProfile: () => void }) {
         />
       ) : null}
       {screen.name === 'create' ? (
-        <CreateEvent
+        <EventForm
           token={token}
           onCancel={() => setScreen({ name: 'list' })}
-          onCreated={(id) => setScreen({ name: 'detail', id })}
+          onSaved={(id) => setScreen({ name: 'detail', id })}
+        />
+      ) : null}
+      {screen.name === 'edit' ? (
+        <EventForm
+          token={token}
+          event={screen.event}
+          onCancel={() => setScreen({ name: 'detail', id: screen.event.id })}
+          onSaved={(id) => setScreen({ name: 'detail', id })}
         />
       ) : null}
     </View>
@@ -238,12 +249,14 @@ function EventDetailView({
   admin,
   eventId,
   onBack,
+  onEdit,
   onOpenUser,
 }: {
   token: string;
   admin: boolean;
   eventId: string;
   onBack: () => void;
+  onEdit: (event: EventSummary) => void;
   onOpenUser: (userId: string) => void;
 }) {
   const [detail, setDetail] = useState<EventDetail | null>(null);
@@ -356,6 +369,11 @@ function EventDetailView({
             <Text style={styles.title} accessibilityRole="header">
               {event.title}
             </Text>
+            {admin ? (
+              <Pressable accessibilityRole="button" onPress={() => onEdit(event)} style={pointer}>
+                <Text style={styles.back}>Edit event</Text>
+              </Pressable>
+            ) : null}
             <Text style={styles.body}>{formatWhen(event.startsAt)}</Text>
             {event.endsAt ? <Text style={styles.muted}>Until {formatWhen(event.endsAt)}</Text> : null}
             {event.location ? <Text style={styles.body}>{event.location}</Text> : null}
@@ -529,24 +547,29 @@ function EventDetailView({
   );
 }
 
-function CreateEvent({
+function EventForm({
   token,
+  event,
   onCancel,
-  onCreated,
+  onSaved,
 }: {
   token: string;
+  event?: EventSummary;
   onCancel: () => void;
-  onCreated: (id: string) => void;
+  onSaved: (id: string) => void;
 }) {
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [location, setLocation] = useState('');
-  const [date, setDate] = useState('');
-  const [time, setTime] = useState('');
-  const [endDate, setEndDate] = useState('');
-  const [endTime, setEndTime] = useState('');
-  const [capacity, setCapacity] = useState('');
-  const [spaces, setSpaces] = useState<(typeof SPACE_OPTIONS)[number]['id'][]>([]);
+  const editing = event != null;
+  const start = splitDateTime(event?.startsAt);
+  const end = splitDateTime(event?.endsAt);
+  const [title, setTitle] = useState(event?.title ?? '');
+  const [description, setDescription] = useState(event?.description ?? '');
+  const [location, setLocation] = useState(event?.location ?? '');
+  const [date, setDate] = useState(start.date);
+  const [time, setTime] = useState(start.time);
+  const [endDate, setEndDate] = useState(end.date);
+  const [endTime, setEndTime] = useState(end.time);
+  const [capacity, setCapacity] = useState(event?.capacity != null ? String(event.capacity) : '');
+  const [spaces, setSpaces] = useState<(typeof SPACE_OPTIONS)[number]['id'][]>(event?.spacesAvailable ?? []);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -578,7 +601,7 @@ function CreateEvent({
     setBusy(true);
     setError(null);
     try {
-      const result = await createEvent(token, {
+      const draft = {
         title: title.trim(),
         description: description.trim(),
         location: location.trim(),
@@ -586,8 +609,14 @@ function CreateEvent({
         endsAt,
         capacity: parsedCapacity,
         spacesAvailable: spaces,
-      });
-      onCreated(result.event.id);
+      };
+      if (event) {
+        await updateEvent(token, event.id, draft);
+        onSaved(event.id);
+      } else {
+        const result = await createEvent(token, draft);
+        onSaved(result.event.id);
+      }
     } catch (reason) {
       setError(messageFrom(reason));
     } finally {
@@ -599,10 +628,10 @@ function CreateEvent({
     <ScrollView style={styles.flex} contentContainerStyle={styles.content}>
       <View style={styles.column}>
         <Pressable accessibilityRole="button" onPress={onCancel} style={pointer}>
-          <Text style={styles.back}>Events</Text>
+          <Text style={styles.back}>{editing ? 'Event' : 'Events'}</Text>
         </Pressable>
         <Text style={styles.title} accessibilityRole="header">
-          Create event
+          {editing ? 'Edit event' : 'Create event'}
         </Text>
         {error ? <ErrorText message={error} /> : null}
         <Field label="Title" value={title} onChangeText={setTitle} />
@@ -645,7 +674,7 @@ function CreateEvent({
             pointer,
           ]}
         >
-          <Text style={styles.primaryLabel}>{busy ? 'Saving…' : 'Save event'}</Text>
+          <Text style={styles.primaryLabel}>{busy ? 'Saving…' : editing ? 'Save changes' : 'Save event'}</Text>
         </Pressable>
       </View>
     </ScrollView>
@@ -726,6 +755,24 @@ function formatWhen(value: string): string {
     return value;
   }
   return date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+function splitDateTime(value: string | null | undefined): { date: string; time: string } {
+  if (!value) {
+    return { date: '', time: '' };
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return { date: '', time: '' };
+  }
+  const month = String(parsed.getMonth() + 1).padStart(2, '0');
+  const day = String(parsed.getDate()).padStart(2, '0');
+  const hours = String(parsed.getHours()).padStart(2, '0');
+  const minutes = String(parsed.getMinutes()).padStart(2, '0');
+  return {
+    date: `${parsed.getFullYear()}-${month}-${day}`,
+    time: `${hours}:${minutes}`,
+  };
 }
 
 function combineDateTime(date: string, time: string): string | null {
