@@ -15,7 +15,7 @@ const OFFERING_OPTIONS = [
 
 export function VendorProfileScreen({ onBack }: { onBack?: () => void }) {
   const editing = onBack != null;
-  const { token, updateUser, signOut } = useAuth();
+  const { token, user, updateUser, signOut } = useAuth();
   const [venmo, setVenmo] = useState('');
   const [contactPerson, setContactPerson] = useState('');
   const [businessName, setBusinessName] = useState('');
@@ -122,6 +122,8 @@ export function VendorProfileScreen({ onBack }: { onBack?: () => void }) {
             ? 'Update the business details used for your market registration.'
             : 'We need these details the first time you sign in, before you can register for a market.'}
         </Text>
+        <ReadOnly label="Name" value={user?.name || '—'} />
+        <ReadOnly label="Email" value={user?.email || '—'} />
         {error ? <Text style={styles.error}>{error}</Text> : null}
         {saved ? <Text style={styles.saved}>Profile saved.</Text> : null}
         {loading ? <ActivityIndicator color={colors.accent} /> : null}
@@ -194,6 +196,15 @@ export function VendorProfileScreen({ onBack }: { onBack?: () => void }) {
         )}
       </View>
     </ScrollView>
+  );
+}
+
+function ReadOnly({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.field}>
+      <Text style={styles.label}>{label}</Text>
+      <Text style={styles.readOnly}>{value}</Text>
+    </View>
   );
 }
 
@@ -300,6 +311,11 @@ const styles = StyleSheet.create({
     color: colors.ink,
     fontSize: 14,
     fontWeight: '600',
+  },
+  readOnly: {
+    color: colors.ink,
+    fontSize: 16,
+    lineHeight: 22,
   },
   input: {
     backgroundColor: colors.card,
