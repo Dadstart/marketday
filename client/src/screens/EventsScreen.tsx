@@ -14,6 +14,7 @@ import {
 import {
   confirmCheckout,
   createEvent,
+  deleteEvent,
   fetchEvent,
   fetchEvents,
   registerForEvent,
@@ -248,6 +249,8 @@ function EventDetailView({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [spaceRequested, setSpaceRequested] = useState<(typeof SPACE_OPTIONS)[number]['id'] | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleteText, setDeleteText] = useState('');
 
   const load = useCallback(() => {
     setError(null);
@@ -292,6 +295,21 @@ function EventDetailView({
     } catch (reason) {
       setError(messageFrom(reason));
     } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeEvent() {
+    if (deleteText !== 'delete') {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await deleteEvent(token, eventId);
+      onBack();
+    } catch (reason) {
+      setError(messageFrom(reason));
       setBusy(false);
     }
   }
@@ -447,6 +465,56 @@ function EventDetailView({
                 </View>
               ))
             )}
+            {admin ? (
+              confirmingDelete ? (
+                <View style={styles.deleteBox}>
+                  <Text style={styles.warning}>
+                    This permanently deletes {event.title} and every registration. Paid booth fees are not refunded.
+                  </Text>
+                  <Field
+                    label="Type delete to confirm"
+                    value={deleteText}
+                    onChangeText={setDeleteText}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={busy || deleteText !== 'delete'}
+                    onPress={() => {
+                      void removeEvent();
+                    }}
+                    style={({ pressed }) => [
+                      styles.deleteButton,
+                      (busy || deleteText !== 'delete') && styles.disabled,
+                      pressed && styles.pressed,
+                      pointer,
+                    ]}
+                  >
+                    <Text style={styles.primaryLabel}>{busy ? 'Deleting…' : 'Delete event'}</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={busy}
+                    onPress={() => {
+                      setConfirmingDelete(false);
+                      setDeleteText('');
+                    }}
+                    style={pointer}
+                  >
+                    <Text style={styles.back}>Keep event</Text>
+                  </Pressable>
+                </View>
+              ) : (
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => setConfirmingDelete(true)}
+                  style={[styles.deleteButton, pointer]}
+                >
+                  <Text style={styles.primaryLabel}>Delete event</Text>
+                </Pressable>
+              )
+            ) : null}
           </>
         ) : null}
       </View>
@@ -583,12 +651,16 @@ function Field({
   onChangeText,
   placeholder,
   multiline,
+  autoCapitalize,
+  autoCorrect,
 }: {
   label: string;
   value: string;
   onChangeText: (value: string) => void;
   placeholder?: string;
   multiline?: boolean;
+  autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
+  autoCorrect?: boolean;
 }) {
   return (
     <View style={styles.field}>
@@ -600,6 +672,8 @@ function Field({
         placeholder={placeholder}
         placeholderTextColor={colors.muted}
         multiline={multiline}
+        autoCapitalize={autoCapitalize}
+        autoCorrect={autoCorrect}
         style={[styles.input, multiline && styles.inputMultiline]}
       />
     </View>
@@ -770,6 +844,23 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     paddingHorizontal: 16,
     paddingVertical: 12,
+  },
+  deleteBox: {
+    gap: 12,
+    marginTop: 12,
+  },
+  deleteButton: {
+    alignSelf: 'flex-start',
+    backgroundColor: colors.danger,
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  warning: {
+    color: colors.danger,
+    fontSize: 15,
+    lineHeight: 22,
+    fontWeight: '600',
   },
   primaryLabel: {
     color: colors.inverseText,

@@ -147,6 +147,10 @@ export function fetchEvent(token: string, eventId: string): Promise<EventDetail>
   return request(`/events/${eventId}`, token);
 }
 
+export function deleteEvent(token: string, eventId: string): Promise<void> {
+  return request(`/events/${eventId}`, token, { method: 'DELETE' });
+}
+
 export function createEvent(token: string, draft: EventDraft): Promise<{ event: EventSummary }> {
   return request('/events', token, {
     method: 'POST',

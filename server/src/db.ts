@@ -703,6 +703,14 @@ export async function registerForEvent(
   throw databaseFailure(error.message);
 }
 
+export async function deleteEvent(eventId: string): Promise<boolean> {
+  const { data, error } = await supabase.from('events').delete().eq('id', eventId).select('id');
+  if (error) {
+    throw databaseFailure(error.message);
+  }
+  return (data ?? []).length > 0;
+}
+
 export async function unregisterFromEvent(eventId: string, userId: string): Promise<void> {
   const { error } = await supabase
     .from('registrations')

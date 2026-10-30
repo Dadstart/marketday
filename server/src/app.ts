@@ -5,6 +5,7 @@ import { signSession, verifyIdentityToken, verifySession } from './auth.js';
 import {
   createEvent,
   DatabaseError,
+  deleteEvent,
   getAccount,
   getBoothFee,
   getEvent,
@@ -161,6 +162,17 @@ app.post('/events', async (c) => {
   const input = parseEventInput(await readJson(c));
   const event = await createEvent(user.id, input);
   return c.json({ event }, 201);
+});
+
+app.delete('/events/:id', async (c) => {
+  if (!c.get('user').admin) {
+    throw new HttpError(403, 'Only an administrator can delete events.');
+  }
+  const deleted = await deleteEvent(c.req.param('id'));
+  if (!deleted) {
+    throw new HttpError(404, 'That event does not exist.');
+  }
+  return c.body(null, 204);
 });
 
 app.get('/events/:id', async (c) => {
