@@ -13,6 +13,7 @@ import type {
   ProviderName,
   RegistrationRecord,
   SpaceRequest,
+  VendorProfileDraft,
   VendorProfileInput,
 } from './types.js';
 
@@ -23,9 +24,18 @@ type UserRow = {
   name: string;
   picture: string | null;
   profile_completed_at: string | null;
+  venmo: string | null;
+  contact_person: string | null;
+  business_name: string | null;
+  phone: string | null;
+  crosswinds_resident: boolean | null;
+  offering: string | null;
+  products_and_services: string | null;
+  facebook_name: string | null;
 };
 
-const userColumns = 'id, provider, email, name, picture, profile_completed_at';
+const userColumns =
+  'id, provider, email, name, picture, profile_completed_at, venmo, contact_person, business_name, phone, crosswinds_resident, offering, products_and_services, facebook_name';
 
 type EventRow = {
   id: string;
@@ -72,28 +82,266 @@ const supabase: SupabaseClient = createClient(supabaseUrl, supabaseServiceRoleKe
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
+const accountLinkColumns =
+  'id, email, created_at, profile_completed_at, picture, venmo, contact_person, business_name, phone, crosswinds_resident, offering, products_and_services, facebook_name';
+
+type AccountLink = {
+  id: string;
+  email: string;
+  created_at: string;
+  profile_completed_at: string | null;
+  picture: string | null;
+  venmo: string | null;
+  contact_person: string | null;
+  business_name: string | null;
+  phone: string | null;
+  crosswinds_resident: boolean | null;
+  offering: string | null;
+  products_and_services: string | null;
+  facebook_name: string | null;
+};
+
 export async function upsertUser(identity: Identity): Promise<CurrentUser> {
+  return linkIdentity(identity, false);
+}
+
+async function linkIdentity(identity: Identity, retried: boolean): Promise<CurrentUser> {
+  const candidates = await findIdentityCandidates(identity);
+  if (candidates.length === 0) {
+    const created = await insertUser(identity);
+    if (created) {
+      return created;
+    }
+    if (retried) {
+      throw databaseFailure('Could not save this account.');
+    }
+    return linkIdentity(identity, true);
+  }
+
+  const survivor = pickSurvivor(candidates);
+  for (const other of candidates) {
+    if (other.id !== survivor.id) {
+      await mergeUserInto(survivor.id, other.id);
+    }
+  }
+  const updated = await updateUserIdentity(survivor.id, identity);
+  if (updated) {
+    return updated;
+  }
+  if (retried) {
+    throw databaseFailure('Could not save this account.');
+  }
+  return linkIdentity(identity, true);
+}
+
+async function findIdentityCandidates(identity: Identity): Promise<AccountLink[]> {
+  const [byExactEmail, byEmail, byProvider] = await Promise.all([
+    supabase.from('users').select(accountLinkColumns).eq('email', identity.email),
+    supabase.from('users').select(accountLinkColumns).ilike('email', exactIlike(identity.email)),
+    supabase
+      .from('users')
+      .select(accountLinkColumns)
+      .eq('provider', identity.provider)
+      .eq('provider_subject', identity.subject)
+      .maybeSingle(),
+  ]);
+
+  if (byExactEmail.error) {
+    throw databaseFailure(byExactEmail.error.message);
+  }
+  if (byEmail.error) {
+    throw databaseFailure(byEmail.error.message);
+  }
+  if (byProvider.error) {
+    throw databaseFailure(byProvider.error.message);
+  }
+
+  const matches = new Map<string, AccountLink>();
+  for (const row of [...((byExactEmail.data ?? []) as AccountLink[]), ...((byEmail.data ?? []) as AccountLink[])]) {
+    if (row.email.trim().toLowerCase() === identity.email) {
+      matches.set(row.id, row);
+    }
+  }
+  if (byProvider.data) {
+    matches.set((byProvider.data as AccountLink).id, byProvider.data as AccountLink);
+  }
+  return [...matches.values()];
+}
+
+async function insertUser(identity: Identity): Promise<CurrentUser | null> {
   const { data, error } = await supabase
     .from('users')
-    .upsert(
-      {
-        provider: identity.provider,
-        provider_subject: identity.subject,
-        email: identity.email,
-        name: identity.name,
-        picture: identity.picture,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'provider,provider_subject' },
-    )
+    .insert({
+      provider: identity.provider,
+      provider_subject: identity.subject,
+      email: identity.email,
+      name: identity.name,
+      picture: identity.picture,
+    })
     .select(userColumns)
     .single();
 
+  if (error?.code === '23505') {
+    return null;
+  }
   if (error || !data) {
     throw databaseFailure(error?.message);
   }
-
   return toCurrentUser(data as UserRow);
+}
+
+async function updateUserIdentity(userId: string, identity: Identity): Promise<CurrentUser | null> {
+  const { data, error } = await supabase
+    .from('users')
+    .update({
+      provider: identity.provider,
+      provider_subject: identity.subject,
+      email: identity.email,
+      name: identity.name,
+      ...(identity.picture ? { picture: identity.picture } : {}),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', userId)
+    .select(userColumns)
+    .single();
+
+  if (error?.code === '23505') {
+    return null;
+  }
+  if (error || !data) {
+    throw databaseFailure(error?.message);
+  }
+  return toCurrentUser(data as UserRow);
+}
+
+function pickSurvivor(candidates: AccountLink[]): AccountLink {
+  return [...candidates].sort((left, right) => {
+    const profile = Number(right.profile_completed_at != null) - Number(left.profile_completed_at != null);
+    if (profile !== 0) {
+      return profile;
+    }
+    return left.created_at.localeCompare(right.created_at) || left.id.localeCompare(right.id);
+  })[0];
+}
+
+async function mergeUserInto(survivorId: string, duplicateId: string): Promise<void> {
+  const [survivor, duplicate] = await Promise.all([loadAccountLink(survivorId), loadAccountLink(duplicateId)]);
+  if (!survivor || !duplicate) {
+    return;
+  }
+
+  const profilePatch = missingProfile(survivor, duplicate);
+  if (Object.keys(profilePatch).length > 0) {
+    const { error } = await supabase.from('users').update(profilePatch).eq('id', survivorId);
+    if (error) {
+      throw databaseFailure(error.message);
+    }
+  }
+
+  await moveRegistrations(survivorId, duplicateId);
+
+  const { error: eventError } = await supabase.from('events').update({ created_by: survivorId }).eq('created_by', duplicateId);
+  if (eventError) {
+    throw databaseFailure(eventError.message);
+  }
+
+  const { error: deleteError } = await supabase.from('users').delete().eq('id', duplicateId);
+  if (deleteError) {
+    throw databaseFailure(deleteError.message);
+  }
+}
+
+async function loadAccountLink(userId: string): Promise<AccountLink | null> {
+  const { data, error } = await supabase.from('users').select(accountLinkColumns).eq('id', userId).maybeSingle();
+  if (error) {
+    throw databaseFailure(error.message);
+  }
+  return data ? (data as AccountLink) : null;
+}
+
+function missingProfile(survivor: AccountLink, duplicate: AccountLink): Partial<AccountLink> {
+  const patch: Partial<AccountLink> = {};
+  const fields = [
+    'picture',
+    'venmo',
+    'contact_person',
+    'business_name',
+    'phone',
+    'crosswinds_resident',
+    'offering',
+    'products_and_services',
+    'facebook_name',
+    'profile_completed_at',
+  ] as const;
+  for (const field of fields) {
+    if (survivor[field] == null && duplicate[field] != null) {
+      patch[field] = duplicate[field] as never;
+    }
+  }
+  return patch;
+}
+
+type RegistrationLink = {
+  id: string;
+  event_id: string;
+  paid_at: string | null;
+  amount_cents: number | null;
+  stripe_checkout_session_id: string | null;
+  space_requested: string | null;
+};
+
+async function moveRegistrations(survivorId: string, duplicateId: string): Promise<void> {
+  const columns = 'id, event_id, paid_at, amount_cents, stripe_checkout_session_id, space_requested';
+  const [survivorResult, duplicateResult] = await Promise.all([
+    supabase.from('registrations').select(columns).eq('user_id', survivorId),
+    supabase.from('registrations').select(columns).eq('user_id', duplicateId),
+  ]);
+  if (survivorResult.error) {
+    throw databaseFailure(survivorResult.error.message);
+  }
+  if (duplicateResult.error) {
+    throw databaseFailure(duplicateResult.error.message);
+  }
+
+  const survivorRows = new Map(
+    ((survivorResult.data ?? []) as RegistrationLink[]).map((row) => [row.event_id, row]),
+  );
+
+  for (const duplicateRow of (duplicateResult.data ?? []) as RegistrationLink[]) {
+    const survivorRow = survivorRows.get(duplicateRow.event_id);
+    if (!survivorRow) {
+      const { error } = await supabase.from('registrations').update({ user_id: survivorId }).eq('id', duplicateRow.id);
+      if (error) {
+        throw databaseFailure(error.message);
+      }
+      continue;
+    }
+
+    const patch: Partial<RegistrationLink> = {};
+    if (survivorRow.space_requested == null && duplicateRow.space_requested != null) {
+      patch.space_requested = duplicateRow.space_requested;
+    }
+    if (survivorRow.paid_at == null && duplicateRow.paid_at != null) {
+      patch.paid_at = duplicateRow.paid_at;
+      patch.amount_cents = duplicateRow.amount_cents;
+      patch.stripe_checkout_session_id = duplicateRow.stripe_checkout_session_id;
+    }
+    if (Object.keys(patch).length > 0) {
+      const { error } = await supabase.from('registrations').update(patch).eq('id', survivorRow.id);
+      if (error) {
+        throw databaseFailure(error.message);
+      }
+    }
+
+    const { error } = await supabase.from('registrations').delete().eq('id', duplicateRow.id);
+    if (error) {
+      throw databaseFailure(error.message);
+    }
+  }
+}
+
+function exactIlike(value: string): string {
+  return value.replace(/%/g, '\\%');
 }
 
 export async function getUserById(userId: string): Promise<CurrentUser | null> {
@@ -147,12 +395,12 @@ type ProfileRow = {
 
 const offerings = new Set(['retail', 'food', 'service', 'group', 'entertainment']);
 
-export async function getVendorProfile(userId: string): Promise<VendorProfileInput | null> {
+export async function getVendorProfile(userId: string): Promise<VendorProfileDraft | null> {
   const { data, error } = await supabase.from('users').select(profileColumns).eq('id', userId).maybeSingle();
   if (error) {
     throw databaseFailure(error.message);
   }
-  return data ? toVendorProfile(data as ProfileRow) : null;
+  return data ? toProfileDraft(data as ProfileRow) : null;
 }
 
 export async function listEvents(userId: string): Promise<EventRecord[]> {
@@ -272,7 +520,8 @@ export async function createEvent(userId: string, input: EventInput): Promise<Ev
   return toEventRecord(data as EventRow, 0, false, false, boothFee?.cents ?? null, null);
 }
 
-const accountSummaryColumns = 'id, name, email, business_name, profile_completed_at';
+const accountSummaryColumns =
+  'id, name, email, business_name, venmo, contact_person, phone, crosswinds_resident, offering, products_and_services, facebook_name, profile_completed_at';
 const accountDetailColumns =
   'id, name, email, provider, business_name, venmo, contact_person, phone, crosswinds_resident, offering, products_and_services, facebook_name, profile_completed_at, created_at';
 
@@ -281,6 +530,13 @@ type AccountSummaryRow = {
   name: string;
   email: string;
   business_name: string | null;
+  venmo: string | null;
+  contact_person: string | null;
+  phone: string | null;
+  crosswinds_resident: boolean | null;
+  offering: string | null;
+  products_and_services: string | null;
+  facebook_name: string | null;
   profile_completed_at: string | null;
 };
 
@@ -333,7 +589,7 @@ function toAccountSummary(row: AccountSummaryRow): AccountSummary {
     name: row.name,
     email: row.email,
     businessName: blankToNull(row.business_name),
-    profileComplete: row.profile_completed_at != null,
+    profileComplete: isProfileComplete(row),
   };
 }
 
@@ -480,31 +736,40 @@ async function selectRegistrations(): Promise<RegistrationRow[]> {
   return (data ?? []) as RegistrationRow[];
 }
 
-function toVendorProfile(row: ProfileRow): VendorProfileInput | null {
-  if (
-    row.profile_completed_at == null ||
-    !row.venmo ||
-    !row.contact_person ||
-    !row.business_name ||
-    !row.phone ||
-    typeof row.crosswinds_resident !== 'boolean' ||
-    !row.offering ||
-    !offerings.has(row.offering) ||
-    !row.products_and_services
-  ) {
-    return null;
-  }
-
+function toProfileDraft(row: ProfileRow): VendorProfileDraft {
   return {
-    venmo: row.venmo,
-    contactPerson: row.contact_person,
-    businessName: row.business_name,
-    phone: row.phone,
-    crosswindsResident: row.crosswinds_resident,
-    offering: row.offering as VendorProfileInput['offering'],
-    productsAndServices: row.products_and_services,
-    facebookName: row.facebook_name,
+    venmo: row.venmo?.trim() ?? '',
+    contactPerson: row.contact_person?.trim() ?? '',
+    businessName: row.business_name?.trim() ?? '',
+    phone: row.phone?.trim() ?? '',
+    crosswindsResident: typeof row.crosswinds_resident === 'boolean' ? row.crosswinds_resident : null,
+    offering: row.offering && offerings.has(row.offering) ? (row.offering as VendorProfileDraft['offering']) : null,
+    productsAndServices: row.products_and_services?.trim() ?? '',
+    facebookName: row.facebook_name?.trim() ?? '',
   };
+}
+
+function isProfileComplete(row: {
+  profile_completed_at: string | null;
+  venmo: string | null;
+  contact_person: string | null;
+  business_name: string | null;
+  phone: string | null;
+  crosswinds_resident: boolean | null;
+  offering: string | null;
+  products_and_services: string | null;
+}): boolean {
+  const phoneDigits = row.phone?.replace(/\D/g, '').length ?? 0;
+  return (
+    row.profile_completed_at != null &&
+    Boolean(row.venmo?.trim()) &&
+    Boolean(row.contact_person?.trim()) &&
+    Boolean(row.business_name?.trim()) &&
+    phoneDigits >= 10 &&
+    typeof row.crosswinds_resident === 'boolean' &&
+    Boolean(row.offering && offerings.has(row.offering)) &&
+    Boolean(row.products_and_services?.trim())
+  );
 }
 
 function toCurrentUser(row: UserRow): CurrentUser {
@@ -515,7 +780,7 @@ function toCurrentUser(row: UserRow): CurrentUser {
     picture: row.picture,
     provider: row.provider,
     admin: isAdminEmail(row.email),
-    profileComplete: row.profile_completed_at != null,
+    profileComplete: isProfileComplete(row),
   };
 }
 

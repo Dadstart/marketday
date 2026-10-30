@@ -31,6 +31,17 @@ export type VendorProfileInput = {
   facebookName: string | null;
 };
 
+export type VendorProfileDraft = {
+  venmo: string;
+  contactPerson: string;
+  businessName: string;
+  phone: string;
+  crosswindsResident: boolean | null;
+  offering: Offering | null;
+  productsAndServices: string;
+  facebookName: string;
+};
+
 export type SpaceRequest = 'grass-generator' | 'grass' | 'food-truck' | 'pavilion';
 
 export type EventInput = {

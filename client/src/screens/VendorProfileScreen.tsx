@@ -27,10 +27,11 @@ export function VendorProfileScreen({ onBack }: { onBack?: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [loading, setLoading] = useState(editing);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!editing || !token) {
+    if (!token) {
+      setLoading(false);
       return;
     }
     let active = true;
@@ -46,7 +47,7 @@ export function VendorProfileScreen({ onBack }: { onBack?: () => void }) {
         setCrosswindsResident(profile.crosswindsResident);
         setOffering(profile.offering);
         setProductsAndServices(profile.productsAndServices);
-        setFacebookName(profile.facebookName ?? '');
+        setFacebookName(profile.facebookName);
       })
       .catch((reason: unknown) => {
         if (active) {
@@ -61,7 +62,7 @@ export function VendorProfileScreen({ onBack }: { onBack?: () => void }) {
     return () => {
       active = false;
     };
-  }, [editing, token]);
+  }, [token]);
 
   async function submit() {
     if (!token) {

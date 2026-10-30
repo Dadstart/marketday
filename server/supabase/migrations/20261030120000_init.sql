@@ -25,6 +25,8 @@ create table public.users (
   unique (provider, provider_subject)
 );
 
+create unique index users_email_lower_idx on public.users (lower(email));
+
 create table public.events (
   id uuid primary key default gen_random_uuid(),
   title text not null,

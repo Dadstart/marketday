@@ -19,8 +19,6 @@ export function parseVendorProfile(body: Record<string, unknown>): VendorProfile
     throw new ProfileError('Say whether you are a Crosswinds resident.');
   }
 
-  const facebook = optionalText(body.facebookName, 160, 'Facebook name');
-
   return {
     venmo: requiredText(body.venmo, 2, 80, 'Enter a Venmo account name or phone number.'),
     contactPerson: requiredText(body.contactPerson, 2, 120, 'Enter the contact person.'),
@@ -34,7 +32,7 @@ export function parseVendorProfile(body: Record<string, unknown>): VendorProfile
       4000,
       'List the products or services you will offer.',
     ),
-    facebookName: facebook,
+    facebookName: optionalText(body.facebookName, 160, 'Facebook name'),
   };
 }
 

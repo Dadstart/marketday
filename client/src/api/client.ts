@@ -83,6 +83,17 @@ export type VendorProfileInput = {
   facebookName: string | null;
 };
 
+export type VendorProfileDraft = {
+  venmo: string;
+  contactPerson: string;
+  businessName: string;
+  phone: string;
+  crosswindsResident: boolean | null;
+  offering: VendorProfileInput['offering'] | null;
+  productsAndServices: string;
+  facebookName: string;
+};
+
 export async function createApiSession(input: {
   provider: 'google' | 'microsoft';
   idToken: string;
@@ -102,8 +113,8 @@ export async function fetchMe(token: string): Promise<SessionUser> {
   return normalizeUser(body.user);
 }
 
-export async function fetchVendorProfile(token: string): Promise<VendorProfileInput | null> {
-  const body = await request<{ profile: VendorProfileInput | null }>('/me/profile', token);
+export async function fetchVendorProfile(token: string): Promise<VendorProfileDraft | null> {
+  const body = await request<{ profile: VendorProfileDraft | null }>('/me/profile', token);
   return body.profile;
 }
 

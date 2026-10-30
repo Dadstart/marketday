@@ -17,13 +17,13 @@ The API listens on `http://localhost:8787`. The Expo app calls it after sign-in.
 
 The database is the Supabase project at `https://fiwpwhgcyhaujunmcdxw.supabase.co`.
 
-1. Open the SQL editor and run `server/supabase/migrations/20261030120000_init.sql`, then `server/supabase/migrations/20261030130000_vendor_profile.sql`, then `server/supabase/migrations/20261030140000_registration_payment.sql`, then `server/supabase/migrations/20261030150000_registration_space.sql`.
+1. Open the SQL editor and run `server/supabase/migrations/20261030120000_init.sql`, then `server/supabase/migrations/20261030130000_vendor_profile.sql`, then `server/supabase/migrations/20261030140000_registration_payment.sql`, then `server/supabase/migrations/20261030150000_registration_space.sql`, then `server/supabase/migrations/20261030160000_same_email.sql`.
 2. In Project Settings → API, copy the `service_role` key into `SUPABASE_SERVICE_ROLE_KEY` in `.env`.
 3. Set `SESSION_SECRET` in `.env` to a long random string.
 
 Booth fees are charged with Stripe Checkout in test mode. `STRIPE_TEST_SECRET_KEY` stays on the server. A Crosswinds resident pays $5. Anyone else pays $10. Registration is saved either way, and an unpaid registration is highlighted on the events page until Stripe reports the payment. Canceling a paid registration refunds that booth fee through Stripe before the signup is removed.
 
-The service role key is used only by the server. Row level security blocks the anon and publishable keys. Authenticated requests carry a session issued after the Google or Microsoft identity token is verified. Creating an event is limited to `andrew@bishop4.com` and `louise@bishop4.com`.
+The service role key is used only by the server. Row level security blocks the anon and publishable keys. Authenticated requests carry a session issued after the Google or Microsoft identity token is verified. A Google account and a Microsoft account with the same email are the same user. Creating an event is limited to `andrew@bishop4.com` and `louise@bishop4.com`.
 
 iOS and Android sign-in need a development build so the OAuth redirect can open this app's URL scheme.
 
