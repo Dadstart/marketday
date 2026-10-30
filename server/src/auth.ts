@@ -56,6 +56,7 @@ export async function verifySession(token: string): Promise<CurrentUser> {
     picture: stringClaim(payload.picture),
     provider,
     admin: isAdminEmail(email),
+    profileComplete: false,
   };
 }
 

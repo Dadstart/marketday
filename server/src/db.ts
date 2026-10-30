@@ -9,6 +9,7 @@ import type {
   Identity,
   ProviderName,
   RegistrationRecord,
+  VendorProfileInput,
 } from './types.js';
 
 type UserRow = {
@@ -17,7 +18,10 @@ type UserRow = {
   email: string;
   name: string;
   picture: string | null;
+  profile_completed_at: string | null;
 };
+
+const userColumns = 'id, provider, email, name, picture, profile_completed_at';
 
 type EventRow = {
   id: string;
@@ -62,7 +66,42 @@ export async function upsertUser(identity: Identity): Promise<CurrentUser> {
       },
       { onConflict: 'provider,provider_subject' },
     )
-    .select('id, provider, email, name, picture')
+    .select(userColumns)
+    .single();
+
+  if (error || !data) {
+    throw databaseFailure(error?.message);
+  }
+
+  return toCurrentUser(data as UserRow);
+}
+
+export async function getUserById(userId: string): Promise<CurrentUser | null> {
+  const { data, error } = await supabase.from('users').select(userColumns).eq('id', userId).maybeSingle();
+  if (error) {
+    throw databaseFailure(error.message);
+  }
+  return data ? toCurrentUser(data as UserRow) : null;
+}
+
+export async function saveVendorProfile(userId: string, input: VendorProfileInput): Promise<CurrentUser> {
+  const { data, error } = await supabase
+    .from('users')
+    .update({
+      venmo: input.venmo,
+      contact_person: input.contactPerson,
+      business_name: input.businessName,
+      phone: input.phone,
+      crosswinds_resident: input.crosswindsResident,
+      space_requested: input.spaceRequested,
+      offering: input.offering,
+      products_and_services: input.productsAndServices,
+      facebook_name: input.facebookName,
+      profile_completed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', userId)
+    .select(userColumns)
     .single();
 
   if (error || !data) {
@@ -230,6 +269,7 @@ function toCurrentUser(row: UserRow): CurrentUser {
     picture: row.picture,
     provider: row.provider,
     admin: isAdminEmail(row.email),
+    profileComplete: row.profile_completed_at != null,
   };
 }
 
@@ -253,7 +293,7 @@ function databaseFailure(message: string | undefined): DatabaseError {
   if (message?.includes('does not exist') || message?.includes('schema cache')) {
     return new DatabaseError(
       503,
-      'The database schema is not installed. Run server/supabase/migrations/20261030120000_init.sql in the Supabase SQL editor.',
+      'The database schema is not installed. Run the SQL files in server/supabase/migrations in the Supabase SQL editor.',
     );
   }
   return new DatabaseError(500, 'The database request failed.');

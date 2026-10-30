@@ -6,11 +6,14 @@ import {
   createEvent,
   DatabaseError,
   getEvent,
+  getUserById,
   listEvents,
   registerForEvent,
+  saveVendorProfile,
   unregisterFromEvent,
   upsertUser,
 } from './db.js';
+import { parseVendorProfile, ProfileError } from './profile.js';
 import type { CurrentUser, EventInput } from './types.js';
 
 type AppVariables = {
@@ -27,8 +30,16 @@ const requireUser: MiddlewareHandler<{ Variables: AppVariables }> = async (c, ne
   }
 
   try {
-    c.set('user', await verifySession(token));
-  } catch {
+    const sessionUser = await verifySession(token);
+    const user = await getUserById(sessionUser.id);
+    if (!user) {
+      throw new HttpError(401, 'Sign in again.');
+    }
+    c.set('user', user);
+  } catch (error) {
+    if (error instanceof HttpError || error instanceof DatabaseError) {
+      throw error;
+    }
     throw new HttpError(401, 'Sign in again.');
   }
   await next();
@@ -39,7 +50,7 @@ app.use(
   cors({
     origin: '*',
     allowHeaders: ['Authorization', 'Content-Type'],
-    allowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+    allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   }),
 );
 
@@ -72,11 +83,26 @@ app.post('/session', async (c) => {
   });
 });
 
+const requireProfile: MiddlewareHandler<{ Variables: AppVariables }> = async (c, next) => {
+  const user = c.get('user');
+  if (!user.admin && !user.profileComplete) {
+    throw new HttpError(403, 'Finish your vendor profile before continuing.');
+  }
+  await next();
+};
+
 app.use('/me', requireUser);
-app.use('/events', requireUser);
-app.use('/events/*', requireUser);
+app.use('/me/*', requireUser);
+app.use('/events', requireUser, requireProfile);
+app.use('/events/*', requireUser, requireProfile);
 
 app.get('/me', (c) => c.json({ user: c.get('user') }));
+
+app.put('/me/profile', async (c) => {
+  const profile = parseVendorProfile(await readJson(c));
+  const user = await saveVendorProfile(c.get('user').id, profile);
+  return c.json({ user });
+});
 
 app.get('/events', async (c) => {
   const events = await listEvents(c.get('user').id);
@@ -123,7 +149,7 @@ app.delete('/events/:id/registrations', async (c) => {
 app.notFound((c) => c.json({ error: 'Not found.' }, 404));
 
 app.onError((error, c) => {
-  if (error instanceof HttpError || error instanceof DatabaseError) {
+  if (error instanceof HttpError || error instanceof DatabaseError || error instanceof ProfileError) {
     return c.json({ error: error.message }, error.status as 400);
   }
   console.error(error);

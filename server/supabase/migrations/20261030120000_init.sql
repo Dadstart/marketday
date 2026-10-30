@@ -9,6 +9,20 @@ create table public.users (
   email text not null,
   name text not null,
   picture text,
+  venmo text,
+  contact_person text,
+  business_name text,
+  phone text,
+  crosswinds_resident boolean,
+  space_requested text check (
+    space_requested is null or space_requested in ('grass-generator', 'grass', 'food-truck', 'pavilion')
+  ),
+  offering text check (
+    offering is null or offering in ('retail', 'food', 'service', 'group', 'entertainment')
+  ),
+  products_and_services text,
+  facebook_name text,
+  profile_completed_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (provider, provider_subject)

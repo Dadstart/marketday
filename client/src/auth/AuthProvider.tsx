@@ -32,6 +32,7 @@ type AuthContextValue = {
   signInWithGoogle: () => void;
   signInWithMicrosoft: () => void;
   signOut: () => void;
+  updateUser: (user: SessionUser) => void;
   clearError: () => void;
 };
 
@@ -64,6 +65,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         setToken(session.token);
         setUser(current);
+        await writeSession({ ...session, user: current });
       } catch (error) {
         if (!active) {
           return;
@@ -142,6 +144,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
   }, []);
 
+  const updateUser = useCallback((next: SessionUser) => {
+    setUser(next);
+    readSession()
+      .then((session) => {
+        if (!session) {
+          return;
+        }
+        return writeSession({ ...session, user: next });
+      })
+      .catch(() => {
+        setError('The vendor profile was saved, but this device could not keep the update.');
+      });
+  }, []);
+
   const clearError = useCallback(() => {
     setError(null);
   }, []);
@@ -162,6 +178,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signInWithGoogle,
       signInWithMicrosoft,
       signOut,
+      updateUser,
       clearError,
     }),
     [
@@ -178,6 +195,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signInWithGoogle,
       signInWithMicrosoft,
       signOut,
+      updateUser,
       token,
       user,
     ],

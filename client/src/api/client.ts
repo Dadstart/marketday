@@ -45,6 +45,18 @@ export type EventDraft = {
   capacity: number | null;
 };
 
+export type VendorProfileInput = {
+  venmo: string;
+  contactPerson: string;
+  businessName: string;
+  phone: string;
+  crosswindsResident: boolean;
+  spaceRequested: 'grass-generator' | 'grass' | 'food-truck' | 'pavilion';
+  offering: 'retail' | 'food' | 'service' | 'group' | 'entertainment';
+  productsAndServices: string;
+  facebookName: string | null;
+};
+
 export async function createApiSession(input: {
   provider: 'google' | 'microsoft';
   idToken: string;
@@ -56,12 +68,23 @@ export async function createApiSession(input: {
   if (!isSession(body)) {
     throw new ApiError('The server returned an unexpected sign-in response.', 500);
   }
-  return body;
+  return { ...body, user: normalizeUser(body.user) };
 }
 
 export async function fetchMe(token: string): Promise<SessionUser> {
   const body = await request<{ user: SessionUser }>('/me', token);
-  return body.user;
+  return normalizeUser(body.user);
+}
+
+export async function saveVendorProfile(
+  token: string,
+  profile: VendorProfileInput,
+): Promise<{ user: SessionUser }> {
+  const body = await request<{ user: SessionUser }>('/me/profile', token, {
+    method: 'PUT',
+    body: JSON.stringify(profile),
+  });
+  return { user: normalizeUser(body.user) };
 }
 
 export function fetchEvents(token: string): Promise<{ events: EventSummary[] }> {
@@ -125,4 +148,12 @@ async function request<T>(path: string, token: string | null, init?: RequestInit
 
 function isSession(value: StoredSession): value is StoredSession {
   return Boolean(value?.token && value.user?.id && typeof value.expiresAt === 'number');
+}
+
+function normalizeUser(user: SessionUser): SessionUser {
+  return {
+    ...user,
+    admin: user.admin === true,
+    profileComplete: user.profileComplete === true,
+  };
 }

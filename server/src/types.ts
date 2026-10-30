@@ -15,6 +15,22 @@ export type CurrentUser = {
   picture: string | null;
   provider: ProviderName;
   admin: boolean;
+  profileComplete: boolean;
+};
+
+export type SpaceRequest = 'grass-generator' | 'grass' | 'food-truck' | 'pavilion';
+export type Offering = 'retail' | 'food' | 'service' | 'group' | 'entertainment';
+
+export type VendorProfileInput = {
+  venmo: string;
+  contactPerson: string;
+  businessName: string;
+  phone: string;
+  crosswindsResident: boolean;
+  spaceRequested: SpaceRequest;
+  offering: Offering;
+  productsAndServices: string;
+  facebookName: string | null;
 };
 
 export type EventInput = {

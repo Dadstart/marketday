@@ -6,6 +6,7 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from './src/auth/AuthProvider';
 import { EventsScreen } from './src/screens/EventsScreen';
 import { SignInScreen } from './src/screens/SignInScreen';
+import { VendorProfileScreen } from './src/screens/VendorProfileScreen';
 import { colors } from './src/theme';
 
 const authPopup = WebBrowser.maybeCompleteAuthSession();
@@ -32,7 +33,11 @@ function Root() {
     <SafeAreaView style={styles.safe}>
       {ready ? (
         user ? (
-          <EventsScreen />
+          user.admin || user.profileComplete ? (
+            <EventsScreen />
+          ) : (
+            <VendorProfileScreen />
+          )
         ) : (
           <SignInScreen />
         )
