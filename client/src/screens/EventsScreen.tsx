@@ -323,12 +323,17 @@ function EventDetailView({
       setError('Choose the space you are requesting.');
       return;
     }
+    const canceling = event.registered;
     setBusy(true);
     setError(null);
     try {
-      const next = event.registered
+      const next = canceling
         ? await unregisterFromEvent(token, event.id)
         : await registerForEvent(token, event.id, selectedSpace as (typeof SPACE_OPTIONS)[number]['id']);
+      if (canceling) {
+        onBack();
+        return;
+      }
       setDetail(next);
     } catch (reason) {
       setError(messageFrom(reason));
