@@ -25,6 +25,7 @@ import {
   type EventSummary,
 } from '../api/client';
 import { useAuth } from '../auth/AuthProvider';
+import { Logo } from '../Logo';
 import { AccountDetailView, AccountList } from './UsersScreen';
 import { colors, pointer, serif } from '../theme';
 import { DateTimeInput } from './DateTimeInput';
@@ -62,29 +63,32 @@ export function EventsScreen({ onEditProfile }: { onEditProfile: () => void }) {
   return (
     <View style={styles.flex}>
       <View style={styles.header}>
-        <View style={styles.headerText}>
-          <Text style={styles.eyebrow}>MARKET DAY</Text>
-          <Text style={styles.headerName} numberOfLines={1}>
-            {user.name}
-            {user.admin ? ' · Administrator' : ''}
-          </Text>
-        </View>
-        <View style={styles.headerActions}>
-          {user.admin ? (
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => setScreen({ name: 'users' })}
-              style={pointer}
-            >
-              <Text style={styles.signOut}>Users</Text>
+        <Logo />
+        <View style={styles.headerRow}>
+          <View style={styles.headerText}>
+            <Text style={styles.eyebrow}>MARKET DAY</Text>
+            <Text style={styles.headerName} numberOfLines={1}>
+              {user.name}
+              {user.admin ? ' · Administrator' : ''}
+            </Text>
+          </View>
+          <View style={styles.headerActions}>
+            {user.admin ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => setScreen({ name: 'users' })}
+                style={pointer}
+              >
+                <Text style={styles.signOut}>Users</Text>
+              </Pressable>
+            ) : null}
+            <Pressable accessibilityRole="button" onPress={onEditProfile} style={pointer}>
+              <Text style={styles.signOut}>Profile</Text>
             </Pressable>
-          ) : null}
-          <Pressable accessibilityRole="button" onPress={onEditProfile} style={pointer}>
-            <Text style={styles.signOut}>Profile</Text>
-          </Pressable>
-          <Pressable accessibilityRole="button" onPress={signOut} style={pointer}>
-            <Text style={styles.signOut}>Sign out</Text>
-          </Pressable>
+            <Pressable accessibilityRole="button" onPress={signOut} style={pointer}>
+              <Text style={styles.signOut}>Sign out</Text>
+            </Pressable>
+          </View>
         </View>
       </View>
       {screen.name === 'list' ? (
@@ -794,6 +798,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingTop: 12,
     paddingBottom: 8,
+  },
+  headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',

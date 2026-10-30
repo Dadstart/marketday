@@ -3,6 +3,7 @@ import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-n
 
 import { googleClientIdEnvName } from '../auth/config';
 import { useAuth } from '../auth/AuthProvider';
+import { Logo } from '../Logo';
 import { colors, pointer, serif } from '../theme';
 
 export function SignInScreen() {
@@ -16,9 +17,7 @@ export function SignInScreen() {
   return (
     <ScrollView style={styles.flex} contentContainerStyle={styles.content}>
       <View style={styles.card}>
-        <View style={styles.mark}>
-          <Text style={styles.markText}>MD</Text>
-        </View>
+        <Logo />
         <Text style={styles.eyebrow}>MARKET DAY</Text>
         <Text style={styles.title} accessibilityRole="header">
           Sign in
@@ -185,24 +184,11 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 440,
   },
-  mark: {
-    width: 56,
-    height: 56,
-    borderRadius: 16,
-    backgroundColor: colors.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 20,
-  },
-  markText: {
-    ...serif,
-    color: colors.inverseText,
-    fontSize: 20,
-  },
   eyebrow: {
     color: colors.muted,
     fontSize: 12,
     letterSpacing: 1.6,
+    marginTop: 4,
     marginBottom: 8,
   },
   title: {

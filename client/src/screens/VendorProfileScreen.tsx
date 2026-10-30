@@ -3,6 +3,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, 
 
 import { fetchVendorProfile, saveVendorProfile, type VendorProfileInput } from '../api/client';
 import { useAuth } from '../auth/AuthProvider';
+import { Logo } from '../Logo';
 import { colors, pointer, serif } from '../theme';
 
 const OFFERING_OPTIONS = [
@@ -107,6 +108,7 @@ export function VendorProfileScreen({ onBack }: { onBack?: () => void }) {
   return (
     <ScrollView style={styles.flex} contentContainerStyle={styles.content}>
       <View style={styles.column}>
+        <Logo />
         <View style={styles.header}>
           <Text style={styles.eyebrow}>MARKET DAY</Text>
           <Pressable accessibilityRole="button" onPress={signOut} style={pointer}>
