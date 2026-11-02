@@ -21,37 +21,6 @@ The database is the Supabase project at `https://fiwpwhgcyhaujunmcdxw.supabase.c
 2. In Project Settings → API, copy the `service_role` key into `SUPABASE_SERVICE_ROLE_KEY` in `.env`.
 3. Set `SESSION_SECRET` in `.env` to a long random string.
 
-### Azure Key Vault
-
-The API reads these server secrets from Azure Key Vault when `AZURE_KEY_VAULT_URL` is set to `https://<vault-name>.vault.azure.net/`. Copies of those secrets in `.env` are ignored. These are the only secrets the server requests:
-
-| Environment variable | Key Vault secret name |
-| --- | --- |
-| `SUPABASE_URL` | `SUPABASE-URL` |
-| `SUPABASE_SERVICE_ROLE_KEY` | `SUPABASE-SERVICE-ROLE-KEY` |
-| `SESSION_SECRET` | `SESSION-SECRET` |
-| `STRIPE_TEST_SECRET_KEY` | `STRIPE-TEST-SECRET-KEY` |
-| `STRIPE_LIVE_SECRET_KEY` | `STRIPE-LIVE-SECRET-KEY` |
-
-Google and Microsoft client IDs stay in the Expo build. They are public. Do not put a Microsoft client secret in the vault.
-
-Install the [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli), then create a vault and give yourself permission to manage secrets. Pick a vault name that is unique across Azure, 3–24 letters and numbers.
-
-```bash
-az login
-az group create --name marketday --location eastus
-az keyvault create --name <vault-name> --resource-group marketday --retention-days 7
-az role assignment create --role "Key Vault Secrets Officer" --assignee <you@email> --scope $(az keyvault show --name <vault-name> --query id -o tsv)
-```
-
-Role assignment can take a minute. Then upload the server secrets currently in `.env`:
-
-```bash
-npm --prefix server run secrets:upload
-```
-
-The command prints secret names only. On Azure, give the app's managed identity the **Key Vault Secrets User** role on that vault, and set `AZURE_KEY_VAULT_URL` on the API. Locally, `az login` is enough. A service principal can use `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, and `AZURE_CLIENT_SECRET` instead.
-
 Booth fees are charged with Stripe Checkout. A live secret key (`STRIPE_LIVE_SECRET_KEY`) is used when it is set. Otherwise the server uses `STRIPE_TEST_SECRET_KEY`. Either key stays on the server. A Crosswinds resident pays $5. Anyone else pays $10. Registration is saved either way, and an unpaid registration is highlighted on the events page until Stripe reports the payment. Canceling a paid registration refunds that booth fee through Stripe before the signup is removed.
 
 The service role key is used only by the server. Row level security blocks the anon and publishable keys. Authenticated requests carry a session issued after the Google or Microsoft identity token is verified. A Google account and a Microsoft account with the same email are the same user. Creating an event is limited to `andrew@bishop4.com` and `louise@bishop4.com`.

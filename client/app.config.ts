@@ -22,6 +22,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: 'Market Day',
   slug: 'marketday',
+  platforms: ['ios', 'android', 'web'],
   scheme: ['marketday', ...new Set(googleSchemes)],
   version: '1.0.0',
   orientation: 'portrait',
