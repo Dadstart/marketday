@@ -26,7 +26,12 @@ export type ConfirmedPayment = {
 
 function stripe(): Stripe {
   if (!stripeTestSecretKey) {
-    throw new PaymentError(503, 'Stripe is not configured. Add STRIPE_TEST_SECRET_KEY to .env.');
+    throw new PaymentError(
+      503,
+      process.env.AZURE_KEY_VAULT_URL?.trim()
+        ? 'Stripe is not configured. Store STRIPE-TEST-SECRET-KEY in Azure Key Vault.'
+        : 'Stripe is not configured. Add STRIPE_TEST_SECRET_KEY to .env.',
+    );
   }
   return new Stripe(stripeTestSecretKey);
 }

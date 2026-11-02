@@ -1,22 +1,15 @@
-import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { loadEnvFile } from './load-env-file.js';
+import { keyVaultSecretName, loadKeyVaultSecrets } from './keyvault.js';
 
-import { config } from 'dotenv';
-
-const rootEnv = fileURLToPath(new URL('../../.env', import.meta.url));
-const localEnv = resolve(process.cwd(), '.env');
-
-if (existsSync(rootEnv)) {
-  config({ path: rootEnv });
-}
-if (existsSync(localEnv) && localEnv !== rootEnv) {
-  config({ path: localEnv, override: true });
-}
+loadEnvFile();
+await loadKeyVaultSecrets();
 
 function required(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) {
+    if (process.env.AZURE_KEY_VAULT_URL?.trim()) {
+      throw new Error(`Missing ${keyVaultSecretName(name)} in Azure Key Vault.`);
+    }
     throw new Error(`Missing ${name}. Add it to .env and start the server again.`);
   }
   return value;
