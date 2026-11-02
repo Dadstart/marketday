@@ -33,6 +33,13 @@ export const googleClientIds = [
 
 export const microsoftClientId = optional('EXPO_PUBLIC_MICROSOFT_CLIENT_ID');
 export const stripeTestSecretKey = optional('STRIPE_TEST_SECRET_KEY');
+export const stripeLiveSecretKey = optional('STRIPE_LIVE_SECRET_KEY');
+
+if (stripeLiveSecretKey && (!stripeLiveSecretKey.startsWith('sk_live_') && !stripeLiveSecretKey.startsWith('rk_live_') && !stripeLiveSecretKey.startsWith('pk_live_'))) {
+  throw new Error('STRIPE_LIVE_SECRET_KEY must be a Stripe live secret key (sk_live_…).');
+}
+
+export const stripeSecretKey = stripeLiveSecretKey ?? stripeTestSecretKey;
 
 if (!Number.isInteger(port) || port <= 0) {
   throw new Error('PORT must be a positive integer.');

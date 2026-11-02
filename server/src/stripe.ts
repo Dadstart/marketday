@@ -1,6 +1,6 @@
 import Stripe from 'stripe';
 
-import { stripeTestSecretKey } from './env.js';
+import { stripeLiveSecretKey, stripeSecretKey } from './env.js';
 import { isBoothFee } from './fees.js';
 
 export class PaymentError extends Error {
@@ -25,15 +25,19 @@ export type ConfirmedPayment = {
 };
 
 function stripe(): Stripe {
-  if (!stripeTestSecretKey) {
+  if (!stripeSecretKey) {
     throw new PaymentError(
       503,
       process.env.AZURE_KEY_VAULT_URL?.trim()
-        ? 'Stripe is not configured. Store STRIPE-TEST-SECRET-KEY in Azure Key Vault.'
-        : 'Stripe is not configured. Add STRIPE_TEST_SECRET_KEY to .env.',
+        ? 'Stripe is not configured. Store STRIPE-LIVE-SECRET-KEY or STRIPE-TEST-SECRET-KEY in Azure Key Vault.'
+        : 'Stripe is not configured. Add STRIPE_LIVE_SECRET_KEY or STRIPE_TEST_SECRET_KEY to .env.',
     );
   }
-  return new Stripe(stripeTestSecretKey);
+  return new Stripe(stripeSecretKey);
+}
+
+if (stripeSecretKey) {
+  console.log(stripeLiveSecretKey ? 'Stripe is using the live secret key.' : 'Stripe is using the test secret key.');
 }
 
 export async function inspectCheckout(sessionId: string): Promise<CheckoutState> {

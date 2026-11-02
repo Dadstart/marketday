@@ -5,13 +5,14 @@ const SECRET_NAMES = [
   'SUPABASE_SERVICE_ROLE_KEY',
   'SESSION_SECRET',
   'STRIPE_TEST_SECRET_KEY',
+  'STRIPE_LIVE_SECRET_KEY',
 ] as const;
 
 export function keyVaultSecretName(envName: string): string {
   return envName.replaceAll('_', '-');
 }
 
-const OPTIONAL_SECRETS = new Set<string>(['SUPABASE_URL', 'STRIPE_TEST_SECRET_KEY']);
+const OPTIONAL_SECRETS = new Set<string>(['SUPABASE_URL', 'STRIPE_TEST_SECRET_KEY', 'STRIPE_LIVE_SECRET_KEY']);
 
 export async function loadKeyVaultSecrets(): Promise<void> {
   const vaultUrl = vaultUrlFromEnv();
