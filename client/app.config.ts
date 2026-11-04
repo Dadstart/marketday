@@ -20,7 +20,7 @@ const googleSchemes = [
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
-  name: 'Market Day',
+  name: 'Community Day',
   slug: 'marketday',
   platforms: ['ios', 'android', 'web'],
   scheme: ['marketday', ...new Set(googleSchemes)],

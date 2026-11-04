@@ -231,7 +231,7 @@ async function request<T>(path: string, token: string | null, init?: RequestInit
   try {
     response = await fetch(`${API_URL}${path}`, { ...init, headers });
   } catch {
-    throw new ApiError('The Market Day server is not running.', 0);
+    throw new ApiError('The Community Day server is not running.', 0);
   }
 
   if (response.status === 204) {

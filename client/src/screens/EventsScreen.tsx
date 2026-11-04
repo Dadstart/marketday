@@ -69,7 +69,7 @@ export function EventsScreen({ onEditProfile }: { onEditProfile: () => void }) {
         <Logo />
         <View style={styles.headerRow}>
           <View style={styles.headerText}>
-            <Text style={styles.eyebrow}>MARKET DAY</Text>
+            <Text style={styles.eyebrow}>COMMUNITY DAY</Text>
             <Text style={styles.headerName} numberOfLines={1}>
               {user.name}
               {user.admin ? ' · Administrator' : ''}

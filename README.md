@@ -1,4 +1,4 @@
-# Market Day
+# Community Day
 
 Sign in with a Google account or a Microsoft account. The same Expo app runs on the web, iOS, and Android.
 

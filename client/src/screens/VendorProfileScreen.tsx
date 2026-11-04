@@ -110,7 +110,7 @@ export function VendorProfileScreen({ onBack }: { onBack?: () => void }) {
       <View style={styles.column}>
         <Logo />
         <View style={styles.header}>
-          <Text style={styles.eyebrow}>MARKET DAY</Text>
+          <Text style={styles.eyebrow}>COMMUNITY DAY</Text>
           <Pressable accessibilityRole="button" onPress={signOut} style={pointer}>
             <Text style={styles.signOut}>Sign out</Text>
           </Pressable>
@@ -178,7 +178,7 @@ export function VendorProfileScreen({ onBack }: { onBack?: () => void }) {
 
         <Text style={styles.help}>
           If you have a Facebook presence for your business, tell us so we can invite you to be
-          co-hosts for the Crosswinds Market Day events. This helps expose the event page to more
+          co-hosts for the Crosswinds Community Day events. This helps expose the event page to more
           people.
         </Text>
         <Field

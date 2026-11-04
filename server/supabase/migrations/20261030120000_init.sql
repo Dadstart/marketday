@@ -1,4 +1,4 @@
--- Market Day: users, events, and registrations.
+-- Community Day: users, events, and registrations.
 -- Run this in the Supabase SQL editor for https://fiwpwhgcyhaujunmcdxw.supabase.co.
 -- The API uses the service role key. Browser and anon keys have no table access.
 
