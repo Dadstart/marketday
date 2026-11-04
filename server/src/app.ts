@@ -150,6 +150,21 @@ app.get('/admin/users/:id', async (c) => {
   return c.json({ user: account });
 });
 
+app.put('/admin/users/:id', async (c) => {
+  const userId = c.req.param('id');
+  const existing = await getAccount(userId);
+  if (!existing) {
+    throw new HttpError(404, 'That account does not exist.');
+  }
+  const profile = parseVendorProfile(await readJson(c));
+  await saveVendorProfile(userId, profile);
+  const account = await getAccount(userId);
+  if (!account) {
+    throw new HttpError(404, 'That account does not exist.');
+  }
+  return c.json({ user: account });
+});
+
 app.get('/events', async (c) => {
   const events = await listEvents(c.get('user').id);
   return c.json({ events });

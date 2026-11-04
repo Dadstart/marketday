@@ -139,6 +139,17 @@ export function fetchAccount(token: string, userId: string): Promise<{ user: Acc
   return request(`/admin/users/${userId}`, token);
 }
 
+export function updateAccount(
+  token: string,
+  userId: string,
+  profile: VendorProfileInput,
+): Promise<{ user: AccountDetail }> {
+  return request(`/admin/users/${userId}`, token, {
+    method: 'PUT',
+    body: JSON.stringify(profile),
+  });
+}
+
 export function fetchEvents(token: string): Promise<{ events: EventSummary[] }> {
   return request('/events', token);
 }
