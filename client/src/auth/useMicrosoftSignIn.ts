@@ -13,7 +13,7 @@ import {
   microsoftClientId,
   microsoftRedirectUri,
 } from './config';
-import { startMicrosoftWebRedirect } from './microsoftWebRedirect';
+import { startWebRedirect } from './webRedirect';
 import { sessionFromAuthResult } from './sessionFromAuth';
 import type { ProviderCredential } from './types';
 
@@ -41,7 +41,12 @@ export function useMicrosoftSignIn() {
     }
 
     if (Platform.OS === 'web') {
-      startMicrosoftWebRedirect(request, microsoftClientId, redirectUri);
+      startWebRedirect({
+        provider: 'microsoft',
+        request,
+        clientId: microsoftClientId,
+        redirectUri,
+      });
       return new Promise<ProviderCredential | null>(() => {
         // The browser leaves this page for Microsoft and comes back at the redirect URI.
       });

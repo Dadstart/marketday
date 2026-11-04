@@ -10,7 +10,7 @@ import {
 } from 'react';
 import { Platform } from 'react-native';
 
-import { resumeMicrosoftWebRedirect } from './microsoftWebRedirect';
+import { resumeWebRedirect } from './webRedirect';
 import { errorMessage } from './sessionFromAuth';
 import { clearSession, readSession, writeSession } from './storage';
 import type { AuthProviderName, ProviderCredential, SessionUser } from './types';
@@ -53,7 +53,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     async function restore() {
       try {
-        const credential = await resumeMicrosoftWebRedirect();
+        const credential = await resumeWebRedirect();
         if (!active) {
           return;
         }
