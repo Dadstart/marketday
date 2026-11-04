@@ -690,6 +690,17 @@ export async function getBoothFee(userId: string): Promise<BoothFee | null> {
   return { cents: feeCents(data.crosswinds_resident), resident: data.crosswinds_resident };
 }
 
+export async function getEventStart(eventId: string): Promise<string | null> {
+  const { data, error } = await supabase.from('events').select('starts_at').eq('id', eventId).maybeSingle();
+  if (error) {
+    throw databaseFailure(error.message);
+  }
+  if (!data) {
+    return null;
+  }
+  return (data.starts_at as string | null) ?? null;
+}
+
 export async function getOwnedRegistration(eventId: string, userId: string): Promise<OwnedRegistration | null> {
   const { data, error } = await supabase
     .from('registrations')

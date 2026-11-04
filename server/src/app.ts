@@ -9,6 +9,7 @@ import {
   getAccount,
   getBoothFee,
   getEvent,
+  getEventStart,
   getOwnedRegistration,
   getUserById,
   getVendorProfile,
@@ -234,6 +235,10 @@ app.delete('/events/:id/registrations', async (c) => {
   const user = c.get('user');
   const eventId = c.req.param('id');
   const registration = await getOwnedRegistration(eventId, user.id);
+  const startsAt = await getEventStart(eventId);
+  if (registration?.paidAt && startsAt && eventHasStarted(startsAt)) {
+    throw new HttpError(409, 'This event has started, so the booth fee cannot be refunded.');
+  }
   if (registration?.paidAt && !registration.stripeCheckoutSessionId) {
     throw new HttpError(
       409,
@@ -399,6 +404,11 @@ async function readJson(c: { req: { json: () => Promise<unknown> } }): Promise<R
     }
     throw new HttpError(400, 'Expected a JSON object.');
   }
+}
+
+function eventHasStarted(startsAt: string): boolean {
+  const start = Date.parse(startsAt);
+  return Number.isFinite(start) && start <= Date.now();
 }
 
 function parseEventInput(body: Record<string, unknown>): EventInput {

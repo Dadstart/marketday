@@ -289,6 +289,7 @@ function EventDetailView({
   const availableSpaces = SPACE_OPTIONS.filter((option) => event?.spacesAvailable.includes(option.id));
   const selectedSpace = availableSpaces.some((option) => option.id === spaceRequested) ? spaceRequested : null;
   const full = event?.capacity != null && event.registrationCount >= event.capacity && !event.registered;
+  const refundClosed = Boolean(event?.registered && event.paid && eventHasStarted(event.startsAt));
 
   async function pay() {
     if (!event) {
@@ -409,8 +410,11 @@ function EventDetailView({
                 ))}
               </>
             )}
-            {event.registered && event.paid ? (
+            {event.registered && event.paid && !refundClosed ? (
               <Text style={styles.paidLabel}>Paid. Canceling refunds this booth fee through Stripe.</Text>
+            ) : null}
+            {refundClosed ? (
+              <Text style={styles.muted}>This event has started, so the booth fee cannot be refunded.</Text>
             ) : null}
             {event.registered && !event.paid ? (
               <View style={styles.unpaidBanner}>
@@ -421,6 +425,7 @@ function EventDetailView({
                 </Text>
               </View>
             ) : null}
+            {refundClosed ? null : (
             <Pressable
               accessibilityRole="button"
               disabled={busy || full || (!event.registered && !selectedSpace)}
@@ -448,6 +453,7 @@ function EventDetailView({
                       : 'Register'}
               </Text>
             </Pressable>
+            )}
             {event.registered && !event.paid ? (
               <Pressable
                 accessibilityRole="button"
@@ -887,6 +893,11 @@ function splitDateTime(value: string | null | undefined): { date: string; time: 
     date: `${parsed.getFullYear()}-${month}-${day}`,
     time: `${hours}:${minutes}`,
   };
+}
+
+function eventHasStarted(startsAt: string): boolean {
+  const start = Date.parse(startsAt);
+  return Number.isFinite(start) && start <= Date.now();
 }
 
 function combineDateTime(date: string, time: string): string | null {
