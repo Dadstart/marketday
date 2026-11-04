@@ -17,13 +17,14 @@ import {
   markRegistrationPaid,
   registerForEvent,
   saveCheckoutSession,
+  saveAdminAccount,
   saveVendorProfile,
   unregisterFromEvent,
   updateEvent,
   upsertUser,
 } from './db.js';
 import { sanitizeDescription } from '../../client/src/description.js';
-import { parseAvailableSpaces, parseSpaceRequest, parseVendorProfile, ProfileError } from './profile.js';
+import { parseAdminNotes, parseAvailableSpaces, parseSpaceRequest, parseVendorProfile, ProfileError } from './profile.js';
 import {
   confirmedPayment,
   createBoothCheckout,
@@ -156,8 +157,10 @@ app.put('/admin/users/:id', async (c) => {
   if (!existing) {
     throw new HttpError(404, 'That account does not exist.');
   }
-  const profile = parseVendorProfile(await readJson(c));
-  await saveVendorProfile(userId, profile);
+  const body = await readJson(c);
+  const profile = parseVendorProfile(body);
+  const adminNotes = parseAdminNotes(body.adminNotes);
+  await saveAdminAccount(userId, profile, adminNotes);
   const account = await getAccount(userId);
   if (!account) {
     throw new HttpError(404, 'That account does not exist.');

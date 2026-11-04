@@ -56,6 +56,7 @@ export type AccountDetail = AccountSummary & {
   offering: string | null;
   productsAndServices: string | null;
   facebookName: string | null;
+  adminNotes: string | null;
   createdAt: string;
 };
 
@@ -142,7 +143,7 @@ export function fetchAccount(token: string, userId: string): Promise<{ user: Acc
 export function updateAccount(
   token: string,
   userId: string,
-  profile: VendorProfileInput,
+  profile: VendorProfileInput & { adminNotes: string | null },
 ): Promise<{ user: AccountDetail }> {
   return request(`/admin/users/${userId}`, token, {
     method: 'PUT',

@@ -52,6 +52,10 @@ export function parseVendorProfile(body: Record<string, unknown>): VendorProfile
   };
 }
 
+export function parseAdminNotes(value: unknown): string | null {
+  return optionalText(value, 4000, 'Notes');
+}
+
 export class ProfileError extends Error {
   readonly status = 400;
 }

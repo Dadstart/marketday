@@ -138,6 +138,7 @@ export function AccountDetailView({
             <Detail label="What they offer" value={offeringLabel(account.offering)} />
             <Detail label="Products and services" value={account.productsAndServices} />
             <Detail label="Facebook group or page" value={account.facebookName} />
+            <Detail label="Notes" value={account.adminNotes} />
           </>
         ) : null}
         {account && editing ? (
@@ -176,6 +177,7 @@ function AccountEditor({
   const [offering, setOffering] = useState<VendorProfileInput['offering'] | null>(knownOffering(account.offering));
   const [productsAndServices, setProductsAndServices] = useState(account.productsAndServices ?? '');
   const [facebookName, setFacebookName] = useState(account.facebookName ?? '');
+  const [adminNotes, setAdminNotes] = useState(account.adminNotes ?? '');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -200,6 +202,7 @@ function AccountEditor({
         offering,
         productsAndServices: productsAndServices.trim(),
         facebookName: facebookName.trim() || null,
+        adminNotes: adminNotes.trim() || null,
       });
       onSaved(result.user);
     } catch (reason) {
@@ -246,6 +249,13 @@ function AccountEditor({
         value={facebookName}
         onChangeText={setFacebookName}
         placeholder="Optional"
+      />
+      <Field
+        label="Notes"
+        value={adminNotes}
+        onChangeText={setAdminNotes}
+        placeholder="Only administrators can see this"
+        multiline
       />
       <View style={styles.choiceRow}>
         <Pressable

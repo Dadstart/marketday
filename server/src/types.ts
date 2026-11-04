@@ -92,5 +92,6 @@ export type AccountDetail = AccountSummary & {
   offering: string | null;
   productsAndServices: string | null;
   facebookName: string | null;
+  adminNotes: string | null;
   createdAt: string;
 };

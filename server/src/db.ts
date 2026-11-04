@@ -89,7 +89,7 @@ const supabase: SupabaseClient = createClient(supabaseUrl, supabaseServiceRoleKe
 });
 
 const accountLinkColumns =
-  'id, email, created_at, profile_completed_at, picture, venmo, contact_person, business_name, phone, crosswinds_resident, offering, products_and_services, facebook_name';
+  'id, email, created_at, profile_completed_at, picture, venmo, contact_person, business_name, phone, crosswinds_resident, offering, products_and_services, facebook_name, admin_notes';
 
 type AccountLink = {
   id: string;
@@ -105,6 +105,7 @@ type AccountLink = {
   offering: string | null;
   products_and_services: string | null;
   facebook_name: string | null;
+  admin_notes: string | null;
 };
 
 export async function upsertUser(identity: Identity): Promise<CurrentUser> {
@@ -277,6 +278,7 @@ function missingProfile(survivor: AccountLink, duplicate: AccountLink): Partial<
     'offering',
     'products_and_services',
     'facebook_name',
+    'admin_notes',
     'profile_completed_at',
   ] as const;
   for (const field of fields) {
@@ -361,18 +363,7 @@ export async function getUserById(userId: string): Promise<CurrentUser | null> {
 export async function saveVendorProfile(userId: string, input: VendorProfileInput): Promise<CurrentUser> {
   const { data, error } = await supabase
     .from('users')
-    .update({
-      venmo: input.venmo,
-      contact_person: input.contactPerson,
-      business_name: input.businessName,
-      phone: input.phone,
-      crosswinds_resident: input.crosswindsResident,
-      offering: input.offering,
-      products_and_services: input.productsAndServices,
-      facebook_name: input.facebookName,
-      profile_completed_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
+    .update(profileUpdate(input))
     .eq('id', userId)
     .select(userColumns)
     .single();
@@ -382,6 +373,38 @@ export async function saveVendorProfile(userId: string, input: VendorProfileInpu
   }
 
   return toCurrentUser(data as UserRow);
+}
+
+export async function saveAdminAccount(
+  userId: string,
+  input: VendorProfileInput,
+  adminNotes: string | null,
+): Promise<void> {
+  const { error } = await supabase
+    .from('users')
+    .update({
+      ...profileUpdate(input),
+      admin_notes: adminNotes,
+    })
+    .eq('id', userId);
+  if (error) {
+    throw databaseFailure(error.message);
+  }
+}
+
+function profileUpdate(input: VendorProfileInput) {
+  return {
+    venmo: input.venmo,
+    contact_person: input.contactPerson,
+    business_name: input.businessName,
+    phone: input.phone,
+    crosswinds_resident: input.crosswindsResident,
+    offering: input.offering,
+    products_and_services: input.productsAndServices,
+    facebook_name: input.facebookName,
+    profile_completed_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
 }
 
 const profileColumns =
@@ -574,7 +597,7 @@ export async function updateEvent(eventId: string, input: EventInput): Promise<b
 const accountSummaryColumns =
   'id, name, email, business_name, venmo, contact_person, phone, crosswinds_resident, offering, products_and_services, facebook_name, profile_completed_at';
 const accountDetailColumns =
-  'id, name, email, provider, business_name, venmo, contact_person, phone, crosswinds_resident, offering, products_and_services, facebook_name, profile_completed_at, created_at';
+  'id, name, email, provider, business_name, venmo, contact_person, phone, crosswinds_resident, offering, products_and_services, facebook_name, admin_notes, profile_completed_at, created_at';
 
 type AccountSummaryRow = {
   id: string;
@@ -600,6 +623,7 @@ type AccountDetailRow = AccountSummaryRow & {
   offering: string | null;
   products_and_services: string | null;
   facebook_name: string | null;
+  admin_notes: string | null;
   created_at: string;
 };
 
@@ -630,6 +654,7 @@ export async function getAccount(userId: string): Promise<AccountDetail | null> 
     offering: blankToNull(row.offering),
     productsAndServices: blankToNull(row.products_and_services),
     facebookName: blankToNull(row.facebook_name),
+    adminNotes: blankToNull(row.admin_notes),
     createdAt: row.created_at,
   };
 }
