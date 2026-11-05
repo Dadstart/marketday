@@ -126,7 +126,7 @@ export function MapScreen({
           Assign spaces
         </Text>
         {map ? <Text style={styles.subtitle}>{map.title}</Text> : null}
-        <Text style={styles.note}>Click a space, then choose an unassigned vendor.</Text>
+        <Text style={styles.note}>Click a space, then choose a vendor who still needs that kind of space.</Text>
         {error ? <Text style={styles.error}>{error}</Text> : null}
         {!map && !error ? <ActivityIndicator color={colors.accent} /> : null}
         {map || error ? (
@@ -224,7 +224,7 @@ export function MapScreen({
                     emptyLabel={
                       map.registrations.length === 0
                         ? 'No vendors are registered for this event.'
-                        : 'Every registered vendor is already assigned.'
+                        : 'No vendor still needs this kind of space.'
                     }
                     onChange={(registrationId) => {
                       void chooseVendor(registrationId);

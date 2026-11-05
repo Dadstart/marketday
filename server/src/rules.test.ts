@@ -3,7 +3,7 @@ import { describe, test } from 'node:test';
 
 import { parseAddressList, recipientNoun } from '../../client/src/email/addresses.js';
 import { MAP_SPOTS, areaLabel, spotLimit } from '../../client/src/map/spots.js';
-import { requestedLabel, unassignedVendors, vendorLabel, vendorOptionLabel } from '../../client/src/map/vendors.js';
+import { canAssignToSpot, requestedLabel, unassignedVendors, vendorLabel, vendorOptionLabel } from '../../client/src/map/vendors.js';
 import type { EventMap, MapRegistration } from '../../client/src/api/client.js';
 import { isAdminEmail } from './admins.js';
 import { databaseFailure, DatabaseError } from './errors.js';
@@ -182,21 +182,40 @@ describe('map vendor choices', () => {
     assert.equal(requestedLabel([]), 'Not chosen');
   });
 
-  test('hides a vendor who already fills every requested space, and keeps the current occupant', () => {
+  test('offers a vendor only for the spaces they still have left, without listing them twice', () => {
+    const mixed: MapRegistration = {
+      id: 'mixed',
+      name: 'Mixed Vendor',
+      businessName: 'Both',
+      spacesRequested: ['grass', 'grass-generator', 'pavilion'],
+    };
+    const duplicate: MapRegistration = { ...ada, id: 'ada' };
     const map: EventMap = {
       title: 'Community Day',
       volunteers: '',
-      registrations: [ada, grace, food],
+      registrations: [ada, grace, food, mixed, duplicate],
       assignments: [
         { area: 'pavilion', spot: 1, registrationId: 'ada' },
         { area: 'pavilion', spot: 2, registrationId: 'ada' },
         { area: 'grass', spot: 1, registrationId: 'grace' },
+        { area: 'grass', spot: 3, registrationId: 'mixed' },
       ],
     };
-    const choices = unassignedVendors(map, 'pavilion', 'ada').map((vendor) => vendor.id);
-    assert.deepEqual(choices, ['ada', 'food']);
-    const open = unassignedVendors(map, 'grass', null).map((vendor) => vendor.id);
-    assert.deepEqual(open, ['food']);
+    assert.deepEqual(unassignedVendors(map, 'pavilion', 'ada').map((vendor) => vendor.id), ['ada', 'mixed']);
+    assert.deepEqual(unassignedVendors(map, 'grass', null).map((vendor) => vendor.id), ['mixed']);
+    assert.deepEqual(unassignedVendors(map, 'food-truck', null).map((vendor) => vendor.id), []);
+    assert.equal(
+      canAssignToSpot(mixed.spacesRequested, map.assignments, 'mixed', 'grass', 4),
+      true,
+    );
+    assert.equal(
+      canAssignToSpot(mixed.spacesRequested, map.assignments, 'mixed', 'pavilion', 4),
+      true,
+    );
+    assert.equal(canAssignToSpot(grace.spacesRequested, map.assignments, 'grace', 'grass', 2), false);
+    assert.equal(canAssignToSpot(grace.spacesRequested, map.assignments, 'grace', 'pavilion', 1), false);
+    assert.equal(canAssignToSpot(food.spacesRequested, map.assignments, 'food', 'food-truck', 1), false);
+    assert.equal(canAssignToSpot(grace.spacesRequested, map.assignments, 'grace', 'grass', 1), true);
   });
 });
 

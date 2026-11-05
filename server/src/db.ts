@@ -3,6 +3,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { isAdminEmail } from './admins.js';
 import { DatabaseError, databaseFailure } from './errors.js';
 import { supabaseServiceRoleKey, supabaseUrl } from './env.js';
+import { canAssignToSpot } from '../../client/src/map/vendors.js';
 import { feeCents } from './fees.js';
 import {
   assertAssignableSpot,
@@ -974,7 +975,7 @@ export async function assignEventSpace(
   if (registrationId) {
     const { data: registration, error: registrationError } = await supabase
       .from('registrations')
-      .select('id')
+      .select('id, spaces_requested')
       .eq('id', registrationId)
       .eq('event_id', eventId)
       .maybeSingle();
@@ -983,6 +984,30 @@ export async function assignEventSpace(
     }
     if (!registration) {
       throw new DatabaseError(404, 'That registration does not exist.');
+    }
+    const { data: assignedRows, error: assignedError } = await supabase
+      .from('space_assignments')
+      .select('area, spot, registration_id')
+      .eq('event_id', eventId)
+      .eq('registration_id', registrationId);
+    if (assignedError) {
+      if (assignedError.message.includes('space_assignments')) {
+        throw new DatabaseError(
+          503,
+          'Run server/supabase/migrations/20261105180000_space_assignments.sql in the Supabase SQL editor.',
+        );
+      }
+      throw databaseFailure(assignedError.message);
+    }
+    const assignments = ((assignedRows ?? []) as AssignmentRow[])
+      .filter((row) => isMapArea(row.area))
+      .map((row) => ({
+        area: row.area as MapArea,
+        spot: row.spot,
+        registrationId: row.registration_id,
+      }));
+    if (!canAssignToSpot(asSpaceList(registration.spaces_requested), assignments, registrationId, area, spot)) {
+      throw new DatabaseError(400, 'That vendor did not request another space of that type.');
     }
   }
 
