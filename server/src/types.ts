@@ -54,6 +54,27 @@ export type EventInput = {
   spacesAvailable: SpaceRequest[];
 };
 
+export type MapArea = 'pavilion' | 'grass' | 'food-truck';
+
+export type SpaceAssignment = {
+  area: MapArea;
+  spot: number;
+  registrationId: string;
+};
+
+export type MapRegistration = {
+  id: string;
+  name: string;
+  businessName: string | null;
+  spacesRequested: SpaceRequest[];
+};
+
+export type EventMap = {
+  title: string;
+  assignments: SpaceAssignment[];
+  registrations: MapRegistration[];
+};
+
 export type EventRecord = EventInput & {
   id: string;
   registrationCount: number;

@@ -10,16 +10,19 @@ import {
   getAccount,
   getBoothFee,
   getEvent,
+  getEventMap,
   getEventStart,
   getOwnedRegistration,
   getUserById,
   getVendorProfile,
   getRegistration,
+  isMapArea,
   listAccounts,
   listEvents,
   markRegistrationPaid,
   markRegistrationPaidByAdmin,
   registerForEvent,
+  assignEventSpace,
   saveCheckoutSession,
   saveAdminAccount,
   saveVendorProfile,
@@ -322,6 +325,36 @@ app.post('/events/:id/registrations/:registrationId/paid', async (c) => {
   }
   await markRegistrationPaidByAdmin(eventId, registration.id, amountCents, stripeCheckoutSessionId);
   return c.json(await eventDetail(c, eventId));
+});
+
+app.get('/events/:id/map', async (c) => {
+  requireRegistrationAdmin(c.get('user'));
+  const map = await getEventMap(c.req.param('id'));
+  if (!map) {
+    throw new HttpError(404, 'That event does not exist.');
+  }
+  return c.json(map);
+});
+
+app.put('/events/:id/map', async (c) => {
+  requireRegistrationAdmin(c.get('user'));
+  const eventId = c.req.param('id');
+  const body = await readJson(c);
+  const area = typeof body.area === 'string' ? body.area : '';
+  const spot = typeof body.spot === 'number' ? body.spot : Number.NaN;
+  const registrationId = body.registrationId == null ? null : String(body.registrationId);
+  if (!isMapArea(area) || !Number.isInteger(spot)) {
+    throw new HttpError(400, 'Choose a space on the map.');
+  }
+  if (!(await getEventMap(eventId))) {
+    throw new HttpError(404, 'That event does not exist.');
+  }
+  await assignEventSpace(eventId, area, spot, registrationId);
+  const map = await getEventMap(eventId);
+  if (!map) {
+    throw new HttpError(404, 'That event does not exist.');
+  }
+  return c.json(map);
 });
 
 app.post('/events/:id/payment', async (c) => {

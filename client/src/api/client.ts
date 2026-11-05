@@ -214,6 +214,44 @@ export function markRegistrationPaid(token: string, eventId: string, registratio
   return request(`/events/${eventId}/registrations/${registrationId}/paid`, token, { method: 'POST' });
 }
 
+export type MapArea = 'pavilion' | 'grass' | 'food-truck';
+
+export type SpaceAssignment = {
+  area: MapArea;
+  spot: number;
+  registrationId: string;
+};
+
+export type MapRegistration = {
+  id: string;
+  name: string;
+  businessName: string | null;
+  spacesRequested: RegistrationSummary['spacesRequested'];
+};
+
+export type EventMap = {
+  title: string;
+  assignments: SpaceAssignment[];
+  registrations: MapRegistration[];
+};
+
+export function fetchEventMap(token: string, eventId: string): Promise<EventMap> {
+  return request(`/events/${eventId}/map`, token);
+}
+
+export function assignEventSpace(
+  token: string,
+  eventId: string,
+  area: MapArea,
+  spot: number,
+  registrationId: string | null,
+): Promise<EventMap> {
+  return request(`/events/${eventId}/map`, token, {
+    method: 'PUT',
+    body: JSON.stringify({ area, spot, registrationId }),
+  });
+}
+
 export function startEventPayment(
   token: string,
   eventId: string,
