@@ -1,8 +1,20 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 import { isAdminEmail } from './admins.js';
+import { DatabaseError, databaseFailure } from './errors.js';
 import { supabaseServiceRoleKey, supabaseUrl } from './env.js';
 import { feeCents } from './fees.js';
+import {
+  assertAssignableSpot,
+  isMapArea,
+  mapSpotLimit,
+  mergeSpaceLists,
+  uniqueRecipients,
+  type EmailAudience,
+} from './guards.js';
+
+export { DatabaseError };
+export { isEmailAudience, isMapArea, type EmailAudience } from './guards.js';
 import type {
   AccountDetail,
   AccountSummary,
@@ -43,20 +55,6 @@ const eventColumns =
   'id, title, description, location, starts_at, ends_at, capacity, spaces_available, created_at';
 
 const spaceOrder: SpaceRequest[] = ['grass-generator', 'grass', 'food-truck', 'pavilion'];
-
-function mergeSpaceLists(left: SpaceRequest[], right: SpaceRequest[]): SpaceRequest[] {
-  const merged: SpaceRequest[] = [];
-  for (const space of spaceOrder) {
-    const count = Math.max(
-      left.filter((item) => item === space).length,
-      right.filter((item) => item === space).length,
-    );
-    for (let index = 0; index < count; index += 1) {
-      merged.push(space);
-    }
-  }
-  return merged;
-}
 
 function asSpaceList(value: unknown): SpaceRequest[] {
   if (!Array.isArray(value)) {
@@ -675,12 +673,6 @@ export async function listAccounts(): Promise<AccountSummary[]> {
   return ((data ?? []) as AccountSummaryRow[]).map(toAccountSummary);
 }
 
-export type EmailAudience = 'vendors' | 'registered' | 'unpaid' | 'addresses';
-
-export function isEmailAudience(value: string): value is EmailAudience {
-  return value === 'vendors' || value === 'registered' || value === 'unpaid' || value === 'addresses';
-}
-
 export async function emailAudienceCounts(
   eventId: string,
 ): Promise<{ vendors: number; registered: number; unpaid: number } | null> {
@@ -734,22 +726,6 @@ async function eventExists(eventId: string): Promise<boolean> {
 type RegistrationEmailRow = {
   users: { name: string | null; email: string | null } | { name: string | null; email: string | null }[] | null;
 };
-
-function uniqueRecipients(rows: { name: string | null; email: string | null }[]): { name: string; email: string }[] {
-  const seen = new Set<string>();
-  const recipients: { name: string; email: string }[] = [];
-  for (const row of rows) {
-    const email = row.email?.trim() ?? '';
-    const key = email.toLowerCase();
-    if (!email.includes('@') || seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    recipients.push({ name: row.name?.trim() || email, email });
-  }
-  recipients.sort((left, right) => left.name.localeCompare(right.name));
-  return recipients;
-}
 
 export async function getAccount(userId: string): Promise<AccountDetail | null> {
   const { data, error } = await supabase.from('users').select(accountDetailColumns).eq('id', userId).maybeSingle();
@@ -882,16 +858,6 @@ export async function updateRegistrationSpaces(
   }
 }
 
-const spotLimits: Record<MapArea, number> = {
-  pavilion: 13,
-  grass: 28,
-  'food-truck': 2,
-};
-
-export function isMapArea(value: string): value is MapArea {
-  return value === 'pavilion' || value === 'grass' || value === 'food-truck';
-}
-
 export async function getEventMap(eventId: string): Promise<EventMap | null> {
   const event = await readEventTitle(eventId);
   if (!event) {
@@ -942,7 +908,7 @@ export async function getEventMap(eventId: string): Promise<EventMap | null> {
           isMapArea(row.area) &&
           Number.isInteger(row.spot) &&
           row.spot >= 1 &&
-          row.spot <= spotLimits[row.area] &&
+          row.spot <= mapSpotLimit(row.area) &&
           registrationIds.has(row.registration_id),
       )
       .map((row) => ({
@@ -1004,9 +970,7 @@ export async function assignEventSpace(
   spot: number,
   registrationId: string | null,
 ): Promise<void> {
-  if (!Number.isInteger(spot) || spot < 1 || spot > spotLimits[area]) {
-    throw new DatabaseError(400, 'That space is not on the map.');
-  }
+  assertAssignableSpot(area, spot);
   if (registrationId) {
     const { data: registration, error: registrationError } = await supabase
       .from('registrations')
@@ -1198,15 +1162,6 @@ export async function unregisterFromEvent(eventId: string, userId: string): Prom
   }
 }
 
-export class DatabaseError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-  ) {
-    super(message);
-  }
-}
-
 async function selectEvents(): Promise<EventRow[]> {
   const { data, error } = await supabase
     .from('events')
@@ -1310,13 +1265,3 @@ function spacesAvailable(values: string[] | null): SpaceRequest[] {
   return spaceOrder.filter((space) => present.has(space));
 }
 
-function databaseFailure(message: string | undefined): DatabaseError {
-  console.error(message ?? 'Supabase request failed.');
-  if (message?.includes('does not exist') || message?.includes('schema cache')) {
-    return new DatabaseError(
-      503,
-      'The database schema is not installed. Run the SQL files in server/supabase/migrations in the Supabase SQL editor.',
-    );
-  }
-  return new DatabaseError(500, 'The database request failed.');
-}
