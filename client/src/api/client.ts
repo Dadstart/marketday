@@ -47,6 +47,7 @@ export type AccountSummary = {
   email: string;
   businessName: string | null;
   profileComplete: boolean;
+  brandingImage: string | null;
 };
 
 export type AccountDetail = AccountSummary & {
@@ -86,6 +87,7 @@ export type VendorProfileInput = {
   offering: 'retail' | 'food' | 'service' | 'group' | 'entertainment';
   productsAndServices: string;
   facebookName: string | null;
+  brandingImage: string | null;
 };
 
 export type VendorProfileDraft = {
@@ -97,6 +99,7 @@ export type VendorProfileDraft = {
   offering: VendorProfileInput['offering'] | null;
   productsAndServices: string;
   facebookName: string;
+  brandingImage: string | null;
 };
 
 export async function createApiSession(input: {

@@ -4,6 +4,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, 
 import { fetchVendorProfile, saveVendorProfile, type VendorProfileInput } from '../api/client';
 import { useAuth } from '../auth/AuthProvider';
 import { Logo } from '../Logo';
+import { BrandingImageField } from './BrandingImageField';
 import { colors, pointer, serif } from '../theme';
 
 const OFFERING_OPTIONS = [
@@ -25,6 +26,7 @@ export function VendorProfileScreen({ onBack }: { onBack?: () => void }) {
   const [offering, setOffering] = useState<VendorProfileInput['offering'] | null>(null);
   const [productsAndServices, setProductsAndServices] = useState('');
   const [facebookName, setFacebookName] = useState('');
+  const [brandingImage, setBrandingImage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -49,6 +51,7 @@ export function VendorProfileScreen({ onBack }: { onBack?: () => void }) {
         setOffering(profile.offering);
         setProductsAndServices(profile.productsAndServices);
         setFacebookName(profile.facebookName);
+        setBrandingImage(profile.brandingImage);
       })
       .catch((reason: unknown) => {
         if (active) {
@@ -91,6 +94,7 @@ export function VendorProfileScreen({ onBack }: { onBack?: () => void }) {
         offering,
         productsAndServices: productsAndServices.trim(),
         facebookName: facebookName.trim() || null,
+        brandingImage,
       });
       updateUser(result.user);
       if (onBack) {
@@ -138,6 +142,7 @@ export function VendorProfileScreen({ onBack }: { onBack?: () => void }) {
         <Field label="Venmo account name or phone number" value={venmo} onChangeText={setVenmo} />
         <Field label="Contact person" value={contactPerson} onChangeText={setContactPerson} />
         <Field label="Name of business" value={businessName} onChangeText={setBusinessName} />
+        <BrandingImageField value={brandingImage} onChange={setBrandingImage} onError={setError} />
         <Field
           label="Phone number"
           value={phone}

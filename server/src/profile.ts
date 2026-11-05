@@ -63,7 +63,29 @@ export function parseVendorProfile(body: Record<string, unknown>): VendorProfile
       'List the products or services you will offer.',
     ),
     facebookName: optionalText(body.facebookName, 160, 'Facebook name'),
+    brandingImage: parseBrandingImage(body.brandingImage),
   };
+}
+
+const BRANDING_IMAGE = /^data:image\/(png|jpeg|gif|webp);base64,([A-Za-z0-9+/]+={0,2})$/;
+const MAX_BRANDING_BYTES = 1_500_000;
+
+export function parseBrandingImage(value: unknown): string | null {
+  if (value == null || value === '') {
+    return null;
+  }
+  if (typeof value !== 'string') {
+    throw new ProfileError('The branding image could not be read.');
+  }
+  const match = BRANDING_IMAGE.exec(value.trim());
+  if (!match) {
+    throw new ProfileError('Use a PNG, JPEG, GIF, or WebP image.');
+  }
+  const bytes = Buffer.from(match[2] ?? '', 'base64');
+  if (bytes.length === 0 || bytes.length > MAX_BRANDING_BYTES) {
+    throw new ProfileError('The branding image must be 1.5 MB or smaller.');
+  }
+  return value.trim();
 }
 
 export function parseAdminNotes(value: unknown): string | null {

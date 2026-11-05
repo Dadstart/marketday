@@ -29,6 +29,7 @@ export type VendorProfileInput = {
   offering: Offering;
   productsAndServices: string;
   facebookName: string | null;
+  brandingImage: string | null;
 };
 
 export type VendorProfileDraft = {
@@ -40,6 +41,7 @@ export type VendorProfileDraft = {
   offering: Offering | null;
   productsAndServices: string;
   facebookName: string;
+  brandingImage: string | null;
 };
 
 export type SpaceRequest = 'grass-generator' | 'grass' | 'food-truck' | 'pavilion';
@@ -105,6 +107,7 @@ export type AccountSummary = {
   email: string;
   businessName: string | null;
   profileComplete: boolean;
+  brandingImage: string | null;
 };
 
 export type AccountDetail = AccountSummary & {
