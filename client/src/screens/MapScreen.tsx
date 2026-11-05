@@ -258,6 +258,13 @@ function vendorLabel(registration: MapRegistration): string {
   return registration.businessName || registration.name;
 }
 
+function vendorOptionLabel(registration: MapRegistration): string {
+  if (!registration.businessName || registration.businessName === registration.name) {
+    return registration.name;
+  }
+  return `${registration.name} — ${registration.businessName}`;
+}
+
 function requestedLabel(spaces: MapRegistration['spacesRequested']): string {
   if (spaces.length === 0) {
     return 'Not chosen';
@@ -389,7 +396,7 @@ function VendorDropdown({
         createElement(
           'option',
           { key: vendor.id, value: vendor.id },
-          `${vendorLabel(vendor)} (${requestedLabel(vendor.spacesRequested)})`,
+          `${vendorOptionLabel(vendor)} (${requestedLabel(vendor.spacesRequested)})`,
         ),
       ),
     );
@@ -403,7 +410,7 @@ function VendorDropdown({
         onPress={() => setOpen((shown) => !shown)}
         style={[styles.dropdownButton, pointer]}
       >
-        <Text style={styles.body}>{current ? vendorLabel(current) : 'Choose a vendor'}</Text>
+        <Text style={styles.body}>{current ? vendorOptionLabel(current) : 'Choose a vendor'}</Text>
       </Pressable>
       {open
         ? vendors.map((vendor) => (
@@ -417,7 +424,7 @@ function VendorDropdown({
               }}
               style={[styles.vendor, pointer]}
             >
-              <Text style={styles.vendorName}>{vendorLabel(vendor)}</Text>
+              <Text style={styles.vendorName}>{vendorOptionLabel(vendor)}</Text>
               <Text style={styles.muted}>{requestedLabel(vendor.spacesRequested)}</Text>
             </Pressable>
           ))
