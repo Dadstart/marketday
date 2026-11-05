@@ -194,6 +194,18 @@ export async function confirmedPayment(sessionId: string): Promise<ConfirmedPaym
   return { registrationId, userId, eventId, amountCents };
 }
 
+export async function expireOpenCheckout(sessionId: string): Promise<void> {
+  const session = await retrieve(sessionId);
+  if (!session || session.status !== 'open') {
+    return;
+  }
+  try {
+    await stripe().checkout.sessions.expire(sessionId);
+  } catch (error) {
+    throw stripeFailure(error);
+  }
+}
+
 async function retrieve(sessionId: string): Promise<Stripe.Checkout.Session | null> {
   if (!sessionId.startsWith('cs_')) {
     return null;

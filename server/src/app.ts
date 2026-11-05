@@ -6,6 +6,7 @@ import {
   createEvent,
   DatabaseError,
   deleteEvent,
+  deleteRegistration,
   getAccount,
   getBoothFee,
   getEvent,
@@ -13,22 +14,27 @@ import {
   getOwnedRegistration,
   getUserById,
   getVendorProfile,
+  getRegistration,
   listAccounts,
   listEvents,
   markRegistrationPaid,
+  markRegistrationPaidByAdmin,
   registerForEvent,
   saveCheckoutSession,
   saveAdminAccount,
   saveVendorProfile,
   unregisterFromEvent,
   updateEvent,
+  updateRegistrationSpaces,
   upsertUser,
 } from './db.js';
 import { sanitizeDescription } from '../../client/src/description.js';
 import { parseAdminNotes, parseAvailableSpaces, parseRequestedSpaces, parseVendorProfile, ProfileError } from './profile.js';
+import { feeCents } from './fees.js';
 import {
   confirmedPayment,
   createBoothCheckout,
+  expireOpenCheckout,
   inspectCheckout,
   PaymentError,
   refundRegistrationPayment,
@@ -236,16 +242,11 @@ app.delete('/events/:id/registrations', async (c) => {
   const eventId = c.req.param('id');
   const registration = await getOwnedRegistration(eventId, user.id);
   const startsAt = await getEventStart(eventId);
-  if (registration?.paidAt && startsAt && eventHasStarted(startsAt)) {
+  const stripePaid = Boolean(registration?.paidAt && registration.stripeCheckoutSessionId);
+  if (stripePaid && startsAt && eventHasStarted(startsAt)) {
     throw new HttpError(409, 'This event has started, so the booth fee cannot be refunded.');
   }
-  if (registration?.paidAt && !registration.stripeCheckoutSessionId) {
-    throw new HttpError(
-      409,
-      'This registration was paid, but the Stripe payment could not be found. It was not canceled.',
-    );
-  }
-  if (registration?.stripeCheckoutSessionId) {
+  if (registration?.stripeCheckoutSessionId && (stripePaid || !registration.paidAt)) {
     await refundRegistrationPayment({
       sessionId: registration.stripeCheckoutSessionId,
       registrationId: registration.id,
@@ -259,6 +260,68 @@ app.delete('/events/:id/registrations', async (c) => {
     throw new HttpError(404, 'That event does not exist.');
   }
   return c.json(result);
+});
+
+app.put('/events/:id/registrations/:registrationId', async (c) => {
+  requireRegistrationAdmin(c.get('user'));
+  const eventId = c.req.param('id');
+  const registrationId = c.req.param('registrationId');
+  const registration = await getRegistration(eventId, registrationId);
+  if (!registration) {
+    throw new HttpError(404, 'That registration does not exist.');
+  }
+  const spacesRequested = parseRequestedSpaces((await readJson(c)).spacesRequested);
+  await updateRegistrationSpaces(eventId, registrationId, spacesRequested);
+  return c.json(await eventDetail(c, eventId));
+});
+
+app.delete('/events/:id/registrations/:registrationId', async (c) => {
+  requireRegistrationAdmin(c.get('user'));
+  const eventId = c.req.param('id');
+  const registration = await getRegistration(eventId, c.req.param('registrationId'));
+  if (!registration) {
+    throw new HttpError(404, 'That registration does not exist.');
+  }
+  const stripePaid = Boolean(registration.paidAt && registration.stripeCheckoutSessionId);
+  if (registration.stripeCheckoutSessionId && (stripePaid || !registration.paidAt)) {
+    await refundRegistrationPayment({
+      sessionId: registration.stripeCheckoutSessionId,
+      registrationId: registration.id,
+      userId: registration.userId,
+      eventId,
+    });
+  }
+  await deleteRegistration(eventId, registration.id);
+  return c.json(await eventDetail(c, eventId));
+});
+
+app.post('/events/:id/registrations/:registrationId/paid', async (c) => {
+  requireRegistrationAdmin(c.get('user'));
+  const eventId = c.req.param('id');
+  const registration = await getRegistration(eventId, c.req.param('registrationId'));
+  if (!registration) {
+    throw new HttpError(404, 'That registration does not exist.');
+  }
+  if (registration.paidAt) {
+    throw new HttpError(409, 'That registration is already paid.');
+  }
+  let stripeCheckoutSessionId: string | null = null;
+  let amountCents = feeCents(false);
+  const fee = await getBoothFee(registration.userId);
+  if (fee) {
+    amountCents = fee.cents;
+  }
+  if (registration.stripeCheckoutSessionId) {
+    const existing = await inspectCheckout(registration.stripeCheckoutSessionId);
+    if (existing.kind === 'paid') {
+      stripeCheckoutSessionId = registration.stripeCheckoutSessionId;
+      amountCents = existing.amountCents;
+    } else {
+      await expireOpenCheckout(registration.stripeCheckoutSessionId);
+    }
+  }
+  await markRegistrationPaidByAdmin(eventId, registration.id, amountCents, stripeCheckoutSessionId);
+  return c.json(await eventDetail(c, eventId));
 });
 
 app.post('/events/:id/payment', async (c) => {
@@ -409,6 +472,20 @@ async function readJson(c: { req: { json: () => Promise<unknown> } }): Promise<R
 function eventHasStarted(startsAt: string): boolean {
   const start = Date.parse(startsAt);
   return Number.isFinite(start) && start <= Date.now();
+}
+
+function requireRegistrationAdmin(user: CurrentUser): void {
+  if (!user.admin) {
+    throw new HttpError(403, 'Only an administrator can change a registration.');
+  }
+}
+
+async function eventDetail(c: { get: (key: 'user') => CurrentUser }, eventId: string) {
+  const result = await getEvent(eventId, c.get('user'));
+  if (!result) {
+    throw new HttpError(404, 'That event does not exist.');
+  }
+  return result;
 }
 
 function parseEventInput(body: Record<string, unknown>): EventInput {

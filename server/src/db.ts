@@ -87,6 +87,7 @@ type RegistrationRow = {
   user_id: string;
   created_at: string;
   paid_at: string | null;
+  stripe_checkout_session_id: string | null;
   spaces_requested: string[] | null;
 };
 
@@ -96,6 +97,7 @@ type RegistrantRow = {
   created_at: string;
   paid_at: string | null;
   amount_cents: number | null;
+  stripe_checkout_session_id: string | null;
   spaces_requested: string[] | null;
   users: { name: string; email: string } | { name: string; email: string }[] | null;
 };
@@ -471,6 +473,7 @@ export async function listEvents(userId: string): Promise<EventRecord[]> {
   const counts = new Map<string, number>();
   const mine = new Set<string>();
   const paid = new Set<string>();
+  const refundable = new Set<string>();
   const spaces = new Map<string, SpaceRequest[]>();
 
   for (const registration of registrations) {
@@ -480,6 +483,9 @@ export async function listEvents(userId: string): Promise<EventRecord[]> {
       spaces.set(registration.event_id, asSpaceList(registration.spaces_requested));
       if (registration.paid_at) {
         paid.add(registration.event_id);
+        if (registration.stripe_checkout_session_id) {
+          refundable.add(registration.event_id);
+        }
       }
     }
   }
@@ -490,6 +496,7 @@ export async function listEvents(userId: string): Promise<EventRecord[]> {
       counts.get(event.id) ?? 0,
       mine.has(event.id),
       paid.has(event.id),
+      refundable.has(event.id),
       boothFee?.cents ?? null,
       spaces.get(event.id) ?? [],
     ),
@@ -515,7 +522,9 @@ export async function getEvent(
 
   const { data: registrationRows, error: registrationError } = await supabase
     .from('registrations')
-    .select('id, user_id, created_at, paid_at, amount_cents, spaces_requested, users(name, email)')
+    .select(
+      'id, user_id, created_at, paid_at, amount_cents, stripe_checkout_session_id, spaces_requested, users(name, email)',
+    )
     .eq('event_id', eventId)
     .order('created_at', { ascending: true });
 
@@ -534,6 +543,7 @@ export async function getEvent(
       name: account?.name ?? 'Registered user',
       email: showEmail ? email : null,
       paid: user.admin ? row.paid_at != null : null,
+      refundable: user.admin ? row.paid_at != null && Boolean(row.stripe_checkout_session_id) : false,
       amountCents: user.admin ? row.amount_cents : null,
       spacesRequested: user.admin ? asSpaceList(row.spaces_requested) : [],
       createdAt: row.created_at,
@@ -549,6 +559,7 @@ export async function getEvent(
       registrations.length,
       mine != null,
       mine?.paid_at != null,
+      mine?.paid_at != null && Boolean(mine.stripe_checkout_session_id),
       boothFee?.cents ?? null,
       asSpaceList(mine?.spaces_requested),
     ),
@@ -577,7 +588,7 @@ export async function createEvent(userId: string, input: EventInput): Promise<Ev
   }
 
   const boothFee = await getBoothFee(userId);
-  return toEventRecord(data as EventRow, 0, false, false, boothFee?.cents ?? null, []);
+  return toEventRecord(data as EventRow, 0, false, false, false, boothFee?.cents ?? null, []);
 }
 
 export async function updateEvent(eventId: string, input: EventInput): Promise<boolean> {
@@ -728,6 +739,103 @@ export async function getEventStart(eventId: string): Promise<string | null> {
   return (data.starts_at as string | null) ?? null;
 }
 
+export async function getRegistration(
+  eventId: string,
+  registrationId: string,
+): Promise<{
+  id: string;
+  userId: string;
+  paidAt: string | null;
+  stripeCheckoutSessionId: string | null;
+} | null> {
+  const { data, error } = await supabase
+    .from('registrations')
+    .select('id, user_id, paid_at, stripe_checkout_session_id')
+    .eq('id', registrationId)
+    .eq('event_id', eventId)
+    .maybeSingle();
+
+  if (error) {
+    throw databaseFailure(error.message);
+  }
+  if (!data) {
+    return null;
+  }
+  return {
+    id: data.id as string,
+    userId: data.user_id as string,
+    paidAt: (data.paid_at as string | null) ?? null,
+    stripeCheckoutSessionId: (data.stripe_checkout_session_id as string | null) ?? null,
+  };
+}
+
+export async function updateRegistrationSpaces(
+  eventId: string,
+  registrationId: string,
+  spacesRequested: SpaceRequest[],
+): Promise<void> {
+  const { data: event, error: eventError } = await supabase
+    .from('events')
+    .select('spaces_available')
+    .eq('id', eventId)
+    .maybeSingle();
+  if (eventError) {
+    throw databaseFailure(eventError.message);
+  }
+  if (!event) {
+    throw new DatabaseError(404, 'That event does not exist.');
+  }
+  const offered = new Set(spacesAvailable((event.spaces_available as string[] | null) ?? []));
+  if (spacesRequested.some((space) => !offered.has(space))) {
+    throw new DatabaseError(400, 'One of those spaces is not available for this event.');
+  }
+
+  const { data, error } = await supabase
+    .from('registrations')
+    .update({ spaces_requested: spacesRequested })
+    .eq('id', registrationId)
+    .eq('event_id', eventId)
+    .select('id');
+  if (error) {
+    throw databaseFailure(error.message);
+  }
+  if ((data ?? []).length === 0) {
+    throw new DatabaseError(404, 'That registration does not exist.');
+  }
+}
+
+export async function deleteRegistration(eventId: string, registrationId: string): Promise<void> {
+  const { error } = await supabase.from('registrations').delete().eq('id', registrationId).eq('event_id', eventId);
+  if (error) {
+    throw databaseFailure(error.message);
+  }
+}
+
+export async function markRegistrationPaidByAdmin(
+  eventId: string,
+  registrationId: string,
+  amountCents: number,
+  stripeCheckoutSessionId: string | null,
+): Promise<void> {
+  const { data, error } = await supabase
+    .from('registrations')
+    .update({
+      paid_at: new Date().toISOString(),
+      amount_cents: amountCents,
+      stripe_checkout_session_id: stripeCheckoutSessionId,
+    })
+    .eq('id', registrationId)
+    .eq('event_id', eventId)
+    .is('paid_at', null)
+    .select('id');
+  if (error) {
+    throw databaseFailure(error.message);
+  }
+  if ((data ?? []).length === 0) {
+    throw new DatabaseError(409, 'That registration is already paid.');
+  }
+}
+
 export async function getOwnedRegistration(eventId: string, userId: string): Promise<OwnedRegistration | null> {
   const { data, error } = await supabase
     .from('registrations')
@@ -857,7 +965,7 @@ async function selectEvents(): Promise<EventRow[]> {
 async function selectRegistrations(): Promise<RegistrationRow[]> {
   const { data, error } = await supabase
     .from('registrations')
-    .select('id, event_id, user_id, created_at, paid_at, spaces_requested');
+    .select('id, event_id, user_id, created_at, paid_at, stripe_checkout_session_id, spaces_requested');
   if (error) {
     throw databaseFailure(error.message);
   }
@@ -917,6 +1025,7 @@ function toEventRecord(
   registrationCount: number,
   registered: boolean,
   paid: boolean,
+  refundable: boolean,
   feeCents: number | null,
   spacesRequested: SpaceRequest[],
 ): EventRecord {
@@ -931,6 +1040,7 @@ function toEventRecord(
     registrationCount,
     registered,
     paid: registered && paid,
+    refundable: registered && paid && refundable,
     feeCents,
     spacesRequested: registered ? spacesRequested : [],
     spacesAvailable: spacesAvailable(row.spaces_available),

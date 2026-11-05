@@ -13,17 +13,21 @@ import {
 } from 'react-native';
 
 import {
+  cancelRegistration,
   confirmCheckout,
   createEvent,
   deleteEvent,
   fetchEvent,
   fetchEvents,
+  markRegistrationPaid,
   registerForEvent,
   startEventPayment,
   unregisterFromEvent,
   updateEvent,
+  updateRegistrationSpaces,
   type EventDetail,
   type EventSummary,
+  type RegistrationSummary,
 } from '../api/client';
 import { useAuth } from '../auth/AuthProvider';
 import { descriptionForEditor } from '../description';
@@ -301,7 +305,8 @@ function EventDetailView({
   const availableSpaces = SPACE_OPTIONS.filter((option) => event?.spacesAvailable.includes(option.id));
   const chosenSpaces = selectedSpaces.filter((id) => availableSpaces.some((option) => option.id === id));
   const full = event?.capacity != null && event.registrationCount >= event.capacity && !event.registered;
-  const refundClosed = Boolean(event?.registered && event.paid && eventHasStarted(event.startsAt));
+  const refundable = Boolean(event?.refundable);
+  const refundClosed = Boolean(refundable && event && eventHasStarted(event.startsAt));
 
   function setSpaceCount(id: (typeof SPACE_OPTIONS)[number]['id'], count: number) {
     const next = Math.max(0, Math.min(MAX_SPACES, count));
@@ -448,7 +453,8 @@ function EventDetailView({
                 })}
               </>
             )}
-            {event.registered && event.paid && !refundClosed ? (
+            {event.registered && event.paid && !refundable ? <Text style={styles.paidLabel}>Paid.</Text> : null}
+            {refundable && !refundClosed ? (
               <Text style={styles.paidLabel}>Paid. Canceling refunds this booth fee through Stripe.</Text>
             ) : null}
             {refundClosed ? (
@@ -479,15 +485,17 @@ function EventDetailView({
             >
               <Text style={styles.primaryLabel}>
                 {busy
-                  ? event.registered && event.paid
+                  ? refundable
                     ? 'Refunding…'
                     : 'Saving…'
                   : full
                     ? 'Event is full'
                     : event.registered
-                      ? event.paid
+                      ? refundable
                         ? 'Cancel and refund'
-                        : 'Cancel registration'
+                        : event.paid
+                          ? 'Cancel'
+                          : 'Cancel registration'
                       : 'Register'}
               </Text>
             </Pressable>
@@ -538,6 +546,15 @@ function EventDetailView({
                     </Text>
                   ) : null}
                   {registration.paid === false ? <Text style={styles.unpaidLabel}>Payment due</Text> : null}
+                  {admin ? (
+                    <RegistrationOverride
+                      token={token}
+                      eventId={event.id}
+                      offered={event.spacesAvailable}
+                      registration={registration}
+                      onChanged={setDetail}
+                    />
+                  ) : null}
                 </View>
               ))
             )}
@@ -935,6 +952,208 @@ function splitDateTime(value: string | null | undefined): { date: string; time: 
   };
 }
 
+function RegistrationOverride({
+  token,
+  eventId,
+  offered,
+  registration,
+  onChanged,
+}: {
+  token: string;
+  eventId: string;
+  offered: RegistrationSummary['spacesRequested'];
+  registration: RegistrationSummary;
+  onChanged: (detail: EventDetail) => void;
+}) {
+  const [mode, setMode] = useState<'view' | 'edit' | 'cancel'>('view');
+  const [spaces, setSpaces] = useState<RegistrationSummary['spacesRequested']>(registration.spacesRequested);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const choices = SPACE_OPTIONS.filter((option) => offered.includes(option.id));
+
+  function setCount(id: RegistrationSummary['spacesRequested'][number], count: number) {
+    const next = Math.max(0, Math.min(MAX_SPACES, count));
+    setSpaces((current) => [...current.filter((item) => item !== id), ...Array.from({ length: next }, () => id)]);
+  }
+
+  async function saveSpaces() {
+    if (spaces.length === 0) {
+      setError('Choose at least one space.');
+      return;
+    }
+    if (spaces.length > MAX_SPACES) {
+      setError('Request 20 spaces or fewer.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      onChanged(await updateRegistrationSpaces(token, eventId, registration.id, spaces));
+      setMode('view');
+    } catch (reason) {
+      setError(messageFrom(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmCancel() {
+    setBusy(true);
+    setError(null);
+    try {
+      onChanged(await cancelRegistration(token, eventId, registration.id));
+    } catch (reason) {
+      setError(messageFrom(reason));
+      setBusy(false);
+    }
+  }
+
+  async function recordPayment() {
+    setBusy(true);
+    setError(null);
+    try {
+      onChanged(await markRegistrationPaid(token, eventId, registration.id));
+    } catch (reason) {
+      setError(messageFrom(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const cancelWarning = registration.refundable
+    ? 'Canceling refunds the Stripe booth fee, including after the event has started.'
+    : 'Remove this registration?';
+
+  return (
+    <View style={styles.override}>
+      {mode === 'view' ? (
+        <View style={styles.adminActions}>
+          <Pressable
+            accessibilityRole="button"
+            disabled={busy}
+            onPress={() => {
+              setSpaces(registration.spacesRequested);
+              setError(null);
+              setMode('edit');
+            }}
+            style={pointer}
+          >
+            <Text style={styles.back}>Modify</Text>
+          </Pressable>
+          {registration.paid === false ? (
+            <Pressable
+              accessibilityRole="button"
+              disabled={busy}
+              onPress={() => {
+                void recordPayment();
+              }}
+              style={pointer}
+            >
+              <Text style={styles.back}>{busy ? 'Saving…' : 'Mark paid'}</Text>
+            </Pressable>
+          ) : null}
+          <Pressable
+            accessibilityRole="button"
+            disabled={busy}
+            onPress={() => {
+              setError(null);
+              setMode('cancel');
+            }}
+            style={pointer}
+          >
+            <Text style={styles.back}>{registration.refundable ? 'Cancel and refund' : 'Cancel'}</Text>
+          </Pressable>
+        </View>
+      ) : null}
+      {mode === 'edit' ? (
+        <View style={styles.overridePanel}>
+          {choices.map((option) => {
+            const count = spaces.filter((id) => id === option.id).length;
+            return (
+              <View key={option.id} style={styles.quantityRow}>
+                <Text style={styles.choiceLabel}>{option.label}</Text>
+                <View style={styles.quantityControls}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Fewer ${option.label}`}
+                    disabled={count === 0 || busy}
+                    onPress={() => setCount(option.id, count - 1)}
+                    style={[styles.quantityButton, (count === 0 || busy) && styles.disabled, pointer]}
+                  >
+                    <Text style={styles.quantityButtonLabel}>−</Text>
+                  </Pressable>
+                  <Text style={styles.quantityCount}>{count}</Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`More ${option.label}`}
+                    disabled={count >= MAX_SPACES || busy}
+                    onPress={() => setCount(option.id, count + 1)}
+                    style={[styles.quantityButton, (count >= MAX_SPACES || busy) && styles.disabled, pointer]}
+                  >
+                    <Text style={styles.quantityButtonLabel}>+</Text>
+                  </Pressable>
+                </View>
+              </View>
+            );
+          })}
+          <View style={styles.adminActions}>
+            <Pressable
+              accessibilityRole="button"
+              disabled={busy}
+              onPress={() => {
+                void saveSpaces();
+              }}
+              style={pointer}
+            >
+              <Text style={styles.back}>{busy ? 'Saving…' : 'Save spaces'}</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              disabled={busy}
+              onPress={() => {
+                setError(null);
+                setMode('view');
+              }}
+              style={pointer}
+            >
+              <Text style={styles.back}>Keep spaces</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
+      {mode === 'cancel' ? (
+        <View style={styles.overridePanel}>
+          <Text style={styles.warning}>{cancelWarning}</Text>
+          <View style={styles.adminActions}>
+            <Pressable
+              accessibilityRole="button"
+              disabled={busy}
+              onPress={() => {
+                void confirmCancel();
+              }}
+              style={pointer}
+            >
+              <Text style={styles.back}>{busy ? 'Canceling…' : 'Confirm cancel'}</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              disabled={busy}
+              onPress={() => {
+                setError(null);
+                setMode('view');
+              }}
+              style={pointer}
+            >
+              <Text style={styles.back}>Keep registration</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+    </View>
+  );
+}
+
 function eventHasStarted(startsAt: string): boolean {
   const start = Date.parse(startsAt);
   return Number.isFinite(start) && start <= Date.now();
@@ -1114,6 +1333,19 @@ const styles = StyleSheet.create({
     color: colors.accent,
     fontSize: 16,
     fontWeight: '600',
+  },
+  override: {
+    gap: 8,
+    marginTop: 8,
+  },
+  overridePanel: {
+    gap: 8,
+  },
+  adminActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 16,
   },
   error: {
     color: colors.danger,

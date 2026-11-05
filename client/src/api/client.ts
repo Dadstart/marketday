@@ -22,6 +22,7 @@ export type EventSummary = {
   registrationCount: number;
   registered: boolean;
   paid: boolean;
+  refundable: boolean;
   feeCents: number | null;
   spacesRequested: ('grass-generator' | 'grass' | 'food-truck' | 'pavilion')[];
   spacesAvailable: ('grass-generator' | 'grass' | 'food-truck' | 'pavilion')[];
@@ -34,6 +35,7 @@ export type RegistrationSummary = {
   name: string;
   email: string | null;
   paid: boolean | null;
+  refundable: boolean;
   amountCents: number | null;
   spacesRequested: ('grass-generator' | 'grass' | 'food-truck' | 'pavilion')[];
   createdAt: string;
@@ -190,6 +192,26 @@ export function registerForEvent(
 
 export function unregisterFromEvent(token: string, eventId: string): Promise<EventDetail> {
   return request(`/events/${eventId}/registrations`, token, { method: 'DELETE' });
+}
+
+export function updateRegistrationSpaces(
+  token: string,
+  eventId: string,
+  registrationId: string,
+  spacesRequested: RegistrationSummary['spacesRequested'],
+): Promise<EventDetail> {
+  return request(`/events/${eventId}/registrations/${registrationId}`, token, {
+    method: 'PUT',
+    body: JSON.stringify({ spacesRequested }),
+  });
+}
+
+export function cancelRegistration(token: string, eventId: string, registrationId: string): Promise<EventDetail> {
+  return request(`/events/${eventId}/registrations/${registrationId}`, token, { method: 'DELETE' });
+}
+
+export function markRegistrationPaid(token: string, eventId: string, registrationId: string): Promise<EventDetail> {
+  return request(`/events/${eventId}/registrations/${registrationId}/paid`, token, { method: 'POST' });
 }
 
 export function startEventPayment(
