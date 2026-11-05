@@ -24,6 +24,7 @@ import {
   registerForEvent,
   assignEventSpace,
   saveCheckoutSession,
+  saveEventVolunteers,
   saveAdminAccount,
   saveVendorProfile,
   unregisterFromEvent,
@@ -330,6 +331,25 @@ app.post('/events/:id/registrations/:registrationId/paid', async (c) => {
 app.get('/events/:id/map', async (c) => {
   requireRegistrationAdmin(c.get('user'));
   const map = await getEventMap(c.req.param('id'));
+  if (!map) {
+    throw new HttpError(404, 'That event does not exist.');
+  }
+  return c.json(map);
+});
+
+app.put('/events/:id/volunteers', async (c) => {
+  requireRegistrationAdmin(c.get('user'));
+  const eventId = c.req.param('id');
+  const body = await readJson(c);
+  if (typeof body.volunteers !== 'string') {
+    throw new HttpError(400, 'Enter the volunteer names.');
+  }
+  const volunteers = body.volunteers.trim();
+  if (volunteers.length > 400) {
+    throw new HttpError(400, 'Volunteer names must be 400 characters or fewer.');
+  }
+  await saveEventVolunteers(eventId, volunteers);
+  const map = await getEventMap(eventId);
   if (!map) {
     throw new HttpError(404, 'That event does not exist.');
   }

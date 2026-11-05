@@ -71,6 +71,7 @@ export type MapRegistration = {
 
 export type EventMap = {
   title: string;
+  volunteers: string;
   assignments: SpaceAssignment[];
   registrations: MapRegistration[];
 };

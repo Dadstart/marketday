@@ -1,4 +1,4 @@
-import { createElement, useCallback, useEffect, useState } from 'react';
+import { createElement, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -7,6 +7,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   useWindowDimensions,
   View,
   type ImageSourcePropType,
@@ -15,6 +16,7 @@ import {
 import {
   assignEventSpace,
   fetchEventMap,
+  saveEventVolunteers,
   type EventMap,
   type MapArea,
   type MapRegistration,
@@ -59,6 +61,8 @@ export function MapScreen({
   const [selected, setSelected] = useState<MapSpot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [volunteers, setVolunteers] = useState('');
+  const editingVolunteers = useRef(false);
 
   const load = useCallback(() => {
     setError(null);
@@ -70,6 +74,28 @@ export function MapScreen({
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (map && !editingVolunteers.current) {
+      setVolunteers(map.volunteers);
+    }
+  }, [map]);
+
+  async function commitVolunteers() {
+    const next = volunteers.trim();
+    if (!map || next === map.volunteers) {
+      setVolunteers(next);
+      return;
+    }
+    setError(null);
+    try {
+      const saved = await saveEventVolunteers(token, eventId, next);
+      setMap(saved);
+      setVolunteers(saved.volunteers);
+    } catch (reason: unknown) {
+      setError(messageFrom(reason));
+    }
+  }
 
   const assignmentFor = useCallback(
     (spot: MapSpot) => map?.assignments.find((item) => item.area === spot.area && item.spot === spot.spot) ?? null,
@@ -161,6 +187,31 @@ export function MapScreen({
                     fontSize={Math.max(10, mapWidth * 0.012)}
                   />
                 ))}
+                {map ? (
+                  <View style={styles.volunteers}>
+                    <Text style={[styles.volunteerLabel, { fontSize: Math.max(11, mapWidth * 0.013) }]}>Volunteers</Text>
+                    <TextInput
+                      accessibilityLabel="Volunteer names"
+                      value={volunteers}
+                      editable={!busy}
+                      onChangeText={setVolunteers}
+                      onFocus={() => {
+                        editingVolunteers.current = true;
+                      }}
+                      onBlur={() => {
+                        editingVolunteers.current = false;
+                        void commitVolunteers();
+                      }}
+                      onSubmitEditing={() => {
+                        editingVolunteers.current = false;
+                        void commitVolunteers();
+                      }}
+                      placeholder="Names, separated by commas"
+                      placeholderTextColor="#8A7A3A"
+                      style={[styles.volunteerInput, { fontSize: Math.max(11, mapWidth * 0.013) }]}
+                    />
+                  </View>
+                ) : null}
               </View>
             </ScrollView>
             {selected ? (
@@ -481,6 +532,31 @@ const styles = StyleSheet.create({
   },
   legendEmpty: {
     color: colors.muted,
+  },
+  volunteers: {
+    position: 'absolute',
+    left: '22%',
+    width: '56%',
+    top: '91.4%',
+    height: '4.4%',
+    zIndex: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#FFF3A3',
+    borderRadius: 2,
+    paddingHorizontal: 6,
+  },
+  volunteerLabel: {
+    color: '#3F3814',
+    fontWeight: '700',
+  },
+  volunteerInput: {
+    flex: 1,
+    color: '#3F3814',
+    paddingVertical: 0,
+    paddingHorizontal: 0,
+    minWidth: 0,
   },
   dropdownButton: {
     borderWidth: 1,

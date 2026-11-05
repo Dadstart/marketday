@@ -231,12 +231,20 @@ export type MapRegistration = {
 
 export type EventMap = {
   title: string;
+  volunteers: string;
   assignments: SpaceAssignment[];
   registrations: MapRegistration[];
 };
 
 export function fetchEventMap(token: string, eventId: string): Promise<EventMap> {
   return request(`/events/${eventId}/map`, token);
+}
+
+export function saveEventVolunteers(token: string, eventId: string, volunteers: string): Promise<EventMap> {
+  return request(`/events/${eventId}/volunteers`, token, {
+    method: 'PUT',
+    body: JSON.stringify({ volunteers }),
+  });
 }
 
 export function assignEventSpace(

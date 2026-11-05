@@ -817,14 +817,7 @@ export function isMapArea(value: string): value is MapArea {
 }
 
 export async function getEventMap(eventId: string): Promise<EventMap | null> {
-  const { data: event, error: eventError } = await supabase
-    .from('events')
-    .select('title')
-    .eq('id', eventId)
-    .maybeSingle();
-  if (eventError) {
-    throw databaseFailure(eventError.message);
-  }
+  const event = await readEventTitle(eventId);
   if (!event) {
     return null;
   }
@@ -864,7 +857,8 @@ export async function getEventMap(eventId: string): Promise<EventMap | null> {
   const registrationIds = new Set(registrations.map((registration) => registration.id));
 
   return {
-    title: event.title as string,
+    title: event.title,
+    volunteers: event.volunteers,
     registrations,
     assignments: ((assignmentRows ?? []) as AssignmentRow[])
       .filter(
@@ -880,6 +874,51 @@ export async function getEventMap(eventId: string): Promise<EventMap | null> {
         spot: row.spot,
         registrationId: row.registration_id,
       })),
+  };
+}
+
+export async function saveEventVolunteers(eventId: string, volunteers: string): Promise<void> {
+  const event = await readEventTitle(eventId);
+  if (!event) {
+    throw new DatabaseError(404, 'That event does not exist.');
+  }
+  const { error } = await supabase
+    .from('events')
+    .update({ volunteers: volunteers || null })
+    .eq('id', eventId);
+  if (error) {
+    if (error.message.includes('volunteers')) {
+      throw new DatabaseError(
+        503,
+        'Run server/supabase/migrations/20261105190000_event_volunteers.sql in the Supabase SQL editor.',
+      );
+    }
+    throw databaseFailure(error.message);
+  }
+}
+
+async function readEventTitle(eventId: string): Promise<{ title: string; volunteers: string } | null> {
+  const withVolunteers = await supabase.from('events').select('title, volunteers').eq('id', eventId).maybeSingle();
+  if (withVolunteers.error?.message.includes('volunteers')) {
+    const titleOnly = await supabase.from('events').select('title').eq('id', eventId).maybeSingle();
+    if (titleOnly.error) {
+      throw databaseFailure(titleOnly.error.message);
+    }
+    if (!titleOnly.data) {
+      return null;
+    }
+    return { title: titleOnly.data.title as string, volunteers: '' };
+  }
+  if (withVolunteers.error) {
+    throw databaseFailure(withVolunteers.error.message);
+  }
+  if (!withVolunteers.data) {
+    return null;
+  }
+  const volunteers = withVolunteers.data.volunteers;
+  return {
+    title: withVolunteers.data.title as string,
+    volunteers: typeof volunteers === 'string' ? volunteers : '',
   };
 }
 
