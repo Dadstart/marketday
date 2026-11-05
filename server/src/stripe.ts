@@ -1,28 +1,19 @@
 import Stripe from 'stripe';
 
+import {
+  classifyCheckout,
+  confirmCheckout,
+  gateRefund,
+  planChargeRefund,
+  shouldExpireOpenCheckout,
+  type CheckoutState,
+  type ConfirmedPayment,
+} from './checkout.js';
 import { stripeLiveSecretKey, stripeSecretKey } from './env.js';
-import { isBoothFee } from './fees.js';
+import { PaymentError } from './errors.js';
 
-export class PaymentError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-  ) {
-    super(message);
-  }
-}
-
-export type CheckoutState =
-  | { kind: 'paid'; amountCents: number }
-  | { kind: 'open'; url: string; amountCents: number }
-  | { kind: 'none' };
-
-export type ConfirmedPayment = {
-  registrationId: string;
-  userId: string;
-  eventId: string;
-  amountCents: number;
-};
+export { PaymentError };
+export type { CheckoutState, ConfirmedPayment };
 
 function stripe(): Stripe {
   if (!stripeSecretKey) {
@@ -36,18 +27,7 @@ if (stripeSecretKey) {
 }
 
 export async function inspectCheckout(sessionId: string): Promise<CheckoutState> {
-  const session = await retrieve(sessionId);
-  if (!session) {
-    return { kind: 'none' };
-  }
-  const amountCents = session.amount_total ?? 0;
-  if (session.payment_status === 'paid' && isBoothFee(amountCents)) {
-    return { kind: 'paid', amountCents };
-  }
-  if (session.status === 'open' && session.url && isBoothFee(amountCents)) {
-    return { kind: 'open', url: session.url, amountCents };
-  }
-  return { kind: 'none' };
+  return classifyCheckout(await retrieve(sessionId));
 }
 
 export async function createBoothCheckout(input: {
@@ -104,22 +84,17 @@ export async function refundRegistrationPayment(input: {
   userId: string;
   eventId: string;
 }): Promise<void> {
-  const session = await retrieve(input.sessionId);
-  if (!session) {
+  const gate = gateRefund(await retrieve(input.sessionId), input);
+  if (gate.action === 'missing') {
     throw new PaymentError(
       409,
       'The Stripe payment for this registration could not be found, so it was not canceled.',
     );
   }
-  if (
-    session.metadata?.registrationId !== input.registrationId ||
-    session.metadata?.userId !== input.userId ||
-    session.metadata?.eventId !== input.eventId
-  ) {
+  if (gate.action === 'forbidden') {
     throw new PaymentError(403, 'That payment belongs to another registration.');
   }
-
-  if (session.status === 'open') {
+  if (gate.action === 'expire') {
     try {
       await stripe().checkout.sessions.expire(input.sessionId);
     } catch (error) {
@@ -127,40 +102,29 @@ export async function refundRegistrationPayment(input: {
     }
     return;
   }
-
-  if (session.payment_status !== 'paid') {
+  if (gate.action === 'skip') {
     return;
-  }
-
-  const paymentIntentId =
-    typeof session.payment_intent === 'string' ? session.payment_intent : session.payment_intent?.id;
-  if (!paymentIntentId) {
-    throw new PaymentError(
-      409,
-      'The Stripe payment for this registration could not be found, so it was not canceled.',
-    );
   }
 
   let intent: Stripe.PaymentIntent;
   try {
-    intent = await stripe().paymentIntents.retrieve(paymentIntentId, { expand: ['latest_charge'] });
+    intent = await stripe().paymentIntents.retrieve(gate.paymentIntentId, { expand: ['latest_charge'] });
   } catch (error) {
     throw stripeFailure(error);
   }
 
-  const amount = intent.amount_received || intent.amount;
-  if (!isBoothFee(amount)) {
+  const chargeRefund = planChargeRefund(intent);
+  if (chargeRefund.action === 'amount') {
     throw new PaymentError(400, 'The payment amount does not match a booth fee, so it was not refunded.');
   }
-  const charge = intent.latest_charge;
-  if (charge && typeof charge !== 'string' && charge.amount_refunded >= amount) {
+  if (chargeRefund.action === 'skip') {
     return;
   }
 
   try {
     await stripe().refunds.create(
       {
-        payment_intent: paymentIntentId,
+        payment_intent: gate.paymentIntentId,
         reason: 'requested_by_customer',
       },
       { idempotencyKey: `registration-refund-${input.registrationId}` },
@@ -174,29 +138,16 @@ export async function refundRegistrationPayment(input: {
 }
 
 export async function confirmedPayment(sessionId: string): Promise<ConfirmedPayment> {
-  const session = await retrieve(sessionId);
-  if (!session) {
-    throw new PaymentError(400, 'That payment session is not valid.');
+  const confirmation = confirmCheckout(await retrieve(sessionId));
+  if (!confirmation.ok) {
+    throw new PaymentError(400, confirmation.message);
   }
-  if (session.payment_status !== 'paid') {
-    throw new PaymentError(400, 'The payment is not complete.');
-  }
-  const amountCents = session.amount_total ?? 0;
-  if (!isBoothFee(amountCents)) {
-    throw new PaymentError(400, 'The payment amount does not match a booth fee.');
-  }
-  const registrationId = session.metadata?.registrationId;
-  const userId = session.metadata?.userId;
-  const eventId = session.metadata?.eventId;
-  if (!registrationId || !userId || !eventId) {
-    throw new PaymentError(400, 'The payment is missing registration details.');
-  }
-  return { registrationId, userId, eventId, amountCents };
+  return confirmation.payment;
 }
 
 export async function expireOpenCheckout(sessionId: string): Promise<void> {
   const session = await retrieve(sessionId);
-  if (!session || session.status !== 'open') {
+  if (!shouldExpireOpenCheckout(session)) {
     return;
   }
   try {

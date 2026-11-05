@@ -22,16 +22,10 @@ import {
   type MapRegistration,
 } from '../api/client';
 import { areaLabel, MAP_IMAGE_HEIGHT, MAP_IMAGE_WIDTH, MAP_SPOTS, spotLimit, type MapSpot } from '../map/spots';
+import { requestedLabel, unassignedVendors, vendorLabel, vendorOptionLabel } from '../map/vendors';
 import { colors, pointer, serif } from '../theme';
 
 const mapImage = require('../../assets/site-map.png') as ImageSourcePropType;
-
-const SPACE_LABELS: Record<MapRegistration['spacesRequested'][number], string> = {
-  'grass-generator': '10x10 grass plus generator',
-  grass: '10x10 grass',
-  'food-truck': 'Food truck',
-  pavilion: '10x10 pavilion',
-};
 
 const AREA_COLOR: Record<MapArea, { fill: string; assigned: string; border: string }> = {
   pavilion: { fill: 'rgba(143, 183, 224, 0.35)', assigned: '#8FB7E0', border: '#3E6F9E' },
@@ -252,63 +246,6 @@ export function MapScreen({
 
 function count(map: EventMap, area: MapArea): number {
   return map.assignments.filter((item) => item.area === area).length;
-}
-
-function vendorLabel(registration: MapRegistration): string {
-  return registration.businessName || registration.name;
-}
-
-function vendorOptionLabel(registration: MapRegistration): string {
-  if (!registration.businessName || registration.businessName === registration.name) {
-    return registration.name;
-  }
-  return `${registration.name} — ${registration.businessName}`;
-}
-
-function requestedLabel(spaces: MapRegistration['spacesRequested']): string {
-  if (spaces.length === 0) {
-    return 'Not chosen';
-  }
-  const order = ['grass-generator', 'grass', 'food-truck', 'pavilion'] as const;
-  return order
-    .flatMap((id) => {
-      const amount = spaces.filter((space) => space === id).length;
-      if (amount === 0) {
-        return [];
-      }
-      return [amount === 1 ? SPACE_LABELS[id] : `${SPACE_LABELS[id]} × ${amount}`];
-    })
-    .join(', ');
-}
-
-function unassignedVendors(map: EventMap, area: MapArea, currentId: string | null): MapRegistration[] {
-  return map.registrations
-    .filter((registration) => {
-      if (registration.id === currentId) {
-        return true;
-      }
-      const assigned = map.assignments.filter((item) => item.registrationId === registration.id).length;
-      const requested = Math.max(registration.spacesRequested.length, 1);
-      return assigned < requested;
-    })
-    .sort((left, right) => {
-      const leftMatch = matchesArea(left, area) ? 0 : 1;
-      const rightMatch = matchesArea(right, area) ? 0 : 1;
-      if (leftMatch !== rightMatch) {
-        return leftMatch - rightMatch;
-      }
-      return vendorLabel(left).localeCompare(vendorLabel(right));
-    });
-}
-
-function matchesArea(registration: MapRegistration, area: MapArea): boolean {
-  if (area === 'pavilion') {
-    return registration.spacesRequested.includes('pavilion');
-  }
-  if (area === 'food-truck') {
-    return registration.spacesRequested.includes('food-truck');
-  }
-  return registration.spacesRequested.includes('grass') || registration.spacesRequested.includes('grass-generator');
 }
 
 function AssignmentList({
