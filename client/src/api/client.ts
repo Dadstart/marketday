@@ -23,7 +23,7 @@ export type EventSummary = {
   registered: boolean;
   paid: boolean;
   feeCents: number | null;
-  spaceRequested: string | null;
+  spacesRequested: ('grass-generator' | 'grass' | 'food-truck' | 'pavilion')[];
   spacesAvailable: ('grass-generator' | 'grass' | 'food-truck' | 'pavilion')[];
   createdAt: string;
 };
@@ -35,7 +35,7 @@ export type RegistrationSummary = {
   email: string | null;
   paid: boolean | null;
   amountCents: number | null;
-  spaceRequested: string | null;
+  spacesRequested: ('grass-generator' | 'grass' | 'food-truck' | 'pavilion')[];
   createdAt: string;
 };
 
@@ -180,11 +180,11 @@ export function createEvent(token: string, draft: EventDraft): Promise<{ event: 
 export function registerForEvent(
   token: string,
   eventId: string,
-  spaceRequested: 'grass-generator' | 'grass' | 'food-truck' | 'pavilion',
+  spacesRequested: ('grass-generator' | 'grass' | 'food-truck' | 'pavilion')[],
 ): Promise<EventDetail> {
   return request(`/events/${eventId}/registrations`, token, {
     method: 'POST',
-    body: JSON.stringify({ spaceRequested }),
+    body: JSON.stringify({ spacesRequested }),
   });
 }
 

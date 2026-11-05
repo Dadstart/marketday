@@ -60,7 +60,7 @@ export type EventRecord = EventInput & {
   registered: boolean;
   paid: boolean;
   feeCents: number | null;
-  spaceRequested: string | null;
+  spacesRequested: SpaceRequest[];
   createdAt: string;
 };
 
@@ -71,7 +71,7 @@ export type RegistrationRecord = {
   email: string | null;
   paid: boolean | null;
   amountCents: number | null;
-  spaceRequested: string | null;
+  spacesRequested: SpaceRequest[];
   createdAt: string;
 };
 

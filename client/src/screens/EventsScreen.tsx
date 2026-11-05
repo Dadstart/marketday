@@ -40,11 +40,23 @@ const SPACE_OPTIONS = [
   { id: 'pavilion', label: '10x10 pavilion' },
 ] as const;
 
-function spaceLabel(id: string | null): string {
-  if (!id) {
+const MAX_SPACES = 20;
+
+function spaceLabel(id: string): string {
+  return SPACE_OPTIONS.find((option) => option.id === id)?.label ?? id;
+}
+
+function spacesLabel(ids: string[]): string {
+  if (ids.length === 0) {
     return 'Not chosen';
   }
-  return SPACE_OPTIONS.find((option) => option.id === id)?.label ?? id;
+  return SPACE_OPTIONS.flatMap((option) => {
+    const count = ids.filter((id) => id === option.id).length;
+    if (count === 0) {
+      return [];
+    }
+    return [count === 1 ? option.label : `${option.label} × ${count}`];
+  }).join(', ');
 }
 
 type Screen =
@@ -269,7 +281,7 @@ function EventDetailView({
   const [detail, setDetail] = useState<EventDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [spaceRequested, setSpaceRequested] = useState<(typeof SPACE_OPTIONS)[number]['id'] | null>(null);
+  const [selectedSpaces, setSelectedSpaces] = useState<(typeof SPACE_OPTIONS)[number]['id'][]>([]);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleteText, setDeleteText] = useState('');
   const [deleting, setDeleting] = useState(false);
@@ -287,9 +299,17 @@ function EventDetailView({
 
   const event = detail?.event;
   const availableSpaces = SPACE_OPTIONS.filter((option) => event?.spacesAvailable.includes(option.id));
-  const selectedSpace = availableSpaces.some((option) => option.id === spaceRequested) ? spaceRequested : null;
+  const chosenSpaces = selectedSpaces.filter((id) => availableSpaces.some((option) => option.id === id));
   const full = event?.capacity != null && event.registrationCount >= event.capacity && !event.registered;
   const refundClosed = Boolean(event?.registered && event.paid && eventHasStarted(event.startsAt));
+
+  function setSpaceCount(id: (typeof SPACE_OPTIONS)[number]['id'], count: number) {
+    const next = Math.max(0, Math.min(MAX_SPACES, count));
+    setSelectedSpaces((current) => [
+      ...current.filter((item) => item !== id),
+      ...Array.from({ length: next }, () => id),
+    ]);
+  }
 
   async function pay() {
     if (!event) {
@@ -341,8 +361,8 @@ function EventDetailView({
     if (!event) {
       return;
     }
-    if (!event.registered && !selectedSpace) {
-      setError('Choose the space you are requesting.');
+    if (!event.registered && chosenSpaces.length === 0) {
+      setError('Choose at least one space.');
       return;
     }
     const canceling = event.registered;
@@ -352,7 +372,7 @@ function EventDetailView({
       if (canceling) {
         await unregisterFromEvent(token, event.id);
       } else {
-        await registerForEvent(token, event.id, selectedSpace as (typeof SPACE_OPTIONS)[number]['id']);
+        await registerForEvent(token, event.id, chosenSpaces);
       }
       onBack();
     } catch (reason) {
@@ -390,24 +410,42 @@ function EventDetailView({
               Spaces available: {event.spacesAvailable.map((id) => spaceLabel(id)).join(', ') || 'None'}
             </Text>
             {event.registered ? (
-              <Text style={styles.body}>Space requested: {spaceLabel(event.spaceRequested)}</Text>
+              <Text style={styles.body}>Spaces requested: {spacesLabel(event.spacesRequested)}</Text>
             ) : (
               <>
-                <Text style={styles.label}>Space requested</Text>
+                <Text style={styles.label}>Spaces requested</Text>
                 {availableSpaces.length === 0 ? (
                   <Text style={styles.muted}>No spaces are available for this event.</Text>
                 ) : null}
-                {availableSpaces.map((option) => (
-                  <Pressable
-                    key={option.id}
-                    accessibilityRole="radio"
-                    accessibilityState={{ selected: selectedSpace === option.id }}
-                    onPress={() => setSpaceRequested(option.id)}
-                    style={[styles.choice, selectedSpace === option.id && styles.choiceSelected, pointer]}
-                  >
-                    <Text style={styles.choiceLabel}>{option.label}</Text>
-                  </Pressable>
-                ))}
+                {availableSpaces.map((option) => {
+                  const count = chosenSpaces.filter((id) => id === option.id).length;
+                  return (
+                    <View key={option.id} style={[styles.quantityRow, count > 0 && styles.choiceSelected]}>
+                      <Text style={styles.choiceLabel}>{option.label}</Text>
+                      <View style={styles.quantityControls}>
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`Remove one ${option.label}`}
+                          disabled={count === 0}
+                          onPress={() => setSpaceCount(option.id, count - 1)}
+                          style={[styles.quantityButton, count === 0 && styles.disabled, pointer]}
+                        >
+                          <Text style={styles.quantityButtonLabel}>−</Text>
+                        </Pressable>
+                        <Text style={styles.quantityCount}>{count}</Text>
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`Add one ${option.label}`}
+                          disabled={count >= MAX_SPACES}
+                          onPress={() => setSpaceCount(option.id, count + 1)}
+                          style={[styles.quantityButton, count >= MAX_SPACES && styles.disabled, pointer]}
+                        >
+                          <Text style={styles.quantityButtonLabel}>+</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  );
+                })}
               </>
             )}
             {event.registered && event.paid && !refundClosed ? (
@@ -428,13 +466,13 @@ function EventDetailView({
             {refundClosed ? null : (
             <Pressable
               accessibilityRole="button"
-              disabled={busy || full || (!event.registered && !selectedSpace)}
+              disabled={busy || full || (!event.registered && chosenSpaces.length === 0)}
               onPress={() => {
                 void changeRegistration();
               }}
               style={({ pressed }) => [
                 styles.primaryButton,
-                (busy || full || (!event.registered && !selectedSpace)) && styles.disabled,
+                (busy || full || (!event.registered && chosenSpaces.length === 0)) && styles.disabled,
                 pressed && styles.pressed,
                 pointer,
               ]}
@@ -491,7 +529,9 @@ function EventDetailView({
                     <Text style={styles.personName}>{registration.name}</Text>
                   )}
                   {registration.email ? <Text style={styles.muted}>{registration.email}</Text> : null}
-                  {admin ? <Text style={styles.meta}>Space requested: {spaceLabel(registration.spaceRequested)}</Text> : null}
+                  {admin ? (
+                    <Text style={styles.meta}>Spaces requested: {spacesLabel(registration.spacesRequested)}</Text>
+                  ) : null}
                   {registration.paid === true ? (
                     <Text style={styles.paidLabel}>
                       Paid{registration.amountCents != null ? ` ${formatFee(registration.amountCents)}` : ''}
@@ -1103,6 +1143,46 @@ const styles = StyleSheet.create({
   choiceLabel: {
     color: colors.ink,
     fontSize: 16,
+  },
+  quantityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.card,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  quantityControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  quantityButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.card,
+  },
+  quantityButtonLabel: {
+    color: colors.ink,
+    fontSize: 20,
+    lineHeight: 24,
+    fontWeight: '600',
+  },
+  quantityCount: {
+    minWidth: 24,
+    textAlign: 'center',
+    color: colors.ink,
+    fontSize: 16,
+    fontWeight: '600',
   },
   input: {
     backgroundColor: colors.card,

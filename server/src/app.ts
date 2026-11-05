@@ -25,7 +25,7 @@ import {
   upsertUser,
 } from './db.js';
 import { sanitizeDescription } from '../../client/src/description.js';
-import { parseAdminNotes, parseAvailableSpaces, parseSpaceRequest, parseVendorProfile, ProfileError } from './profile.js';
+import { parseAdminNotes, parseAvailableSpaces, parseRequestedSpaces, parseVendorProfile, ProfileError } from './profile.js';
 import {
   confirmedPayment,
   createBoothCheckout,
@@ -222,8 +222,8 @@ app.get('/events/:id', async (c) => {
 
 app.post('/events/:id/registrations', async (c) => {
   const body = await readJson(c);
-  const spaceRequested = parseSpaceRequest(body.spaceRequested);
-  await registerForEvent(c.req.param('id'), c.get('user').id, spaceRequested);
+  const spacesRequested = parseRequestedSpaces(body.spacesRequested);
+  await registerForEvent(c.req.param('id'), c.get('user').id, spacesRequested);
   const result = await getEvent(c.req.param('id'), c.get('user'));
   if (!result) {
     throw new HttpError(404, 'That event does not exist.');

@@ -42,6 +42,33 @@ const eventColumns =
 
 const spaceOrder: SpaceRequest[] = ['grass-generator', 'grass', 'food-truck', 'pavilion'];
 
+function mergeSpaceLists(left: SpaceRequest[], right: SpaceRequest[]): SpaceRequest[] {
+  const merged: SpaceRequest[] = [];
+  for (const space of spaceOrder) {
+    const count = Math.max(
+      left.filter((item) => item === space).length,
+      right.filter((item) => item === space).length,
+    );
+    for (let index = 0; index < count; index += 1) {
+      merged.push(space);
+    }
+  }
+  return merged;
+}
+
+function asSpaceList(value: unknown): SpaceRequest[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const spaces: SpaceRequest[] = [];
+  for (const item of value) {
+    if (typeof item === 'string' && spaceOrder.includes(item as SpaceRequest)) {
+      spaces.push(item as SpaceRequest);
+    }
+  }
+  return spaces;
+}
+
 type EventRow = {
   id: string;
   title: string;
@@ -60,7 +87,7 @@ type RegistrationRow = {
   user_id: string;
   created_at: string;
   paid_at: string | null;
-  space_requested: string | null;
+  spaces_requested: string[] | null;
 };
 
 type RegistrantRow = {
@@ -69,7 +96,7 @@ type RegistrantRow = {
   created_at: string;
   paid_at: string | null;
   amount_cents: number | null;
-  space_requested: string | null;
+  spaces_requested: string[] | null;
   users: { name: string; email: string } | { name: string; email: string }[] | null;
 };
 
@@ -295,11 +322,11 @@ type RegistrationLink = {
   paid_at: string | null;
   amount_cents: number | null;
   stripe_checkout_session_id: string | null;
-  space_requested: string | null;
+  spaces_requested: string[] | null;
 };
 
 async function moveRegistrations(survivorId: string, duplicateId: string): Promise<void> {
-  const columns = 'id, event_id, paid_at, amount_cents, stripe_checkout_session_id, space_requested';
+  const columns = 'id, event_id, paid_at, amount_cents, stripe_checkout_session_id, spaces_requested';
   const [survivorResult, duplicateResult] = await Promise.all([
     supabase.from('registrations').select(columns).eq('user_id', survivorId),
     supabase.from('registrations').select(columns).eq('user_id', duplicateId),
@@ -326,8 +353,11 @@ async function moveRegistrations(survivorId: string, duplicateId: string): Promi
     }
 
     const patch: Partial<RegistrationLink> = {};
-    if (survivorRow.space_requested == null && duplicateRow.space_requested != null) {
-      patch.space_requested = duplicateRow.space_requested;
+    const survivorSpaces = asSpaceList(survivorRow.spaces_requested);
+    const duplicateSpaces = asSpaceList(duplicateRow.spaces_requested);
+    const merged = mergeSpaceLists(survivorSpaces, duplicateSpaces);
+    if (merged.join('\0') !== survivorSpaces.join('\0')) {
+      patch.spaces_requested = merged;
     }
     if (survivorRow.paid_at == null && duplicateRow.paid_at != null) {
       patch.paid_at = duplicateRow.paid_at;
@@ -441,13 +471,13 @@ export async function listEvents(userId: string): Promise<EventRecord[]> {
   const counts = new Map<string, number>();
   const mine = new Set<string>();
   const paid = new Set<string>();
-  const spaces = new Map<string, string | null>();
+  const spaces = new Map<string, SpaceRequest[]>();
 
   for (const registration of registrations) {
     counts.set(registration.event_id, (counts.get(registration.event_id) ?? 0) + 1);
     if (registration.user_id === userId) {
       mine.add(registration.event_id);
-      spaces.set(registration.event_id, registration.space_requested);
+      spaces.set(registration.event_id, asSpaceList(registration.spaces_requested));
       if (registration.paid_at) {
         paid.add(registration.event_id);
       }
@@ -461,7 +491,7 @@ export async function listEvents(userId: string): Promise<EventRecord[]> {
       mine.has(event.id),
       paid.has(event.id),
       boothFee?.cents ?? null,
-      spaces.get(event.id) ?? null,
+      spaces.get(event.id) ?? [],
     ),
   );
 }
@@ -485,7 +515,7 @@ export async function getEvent(
 
   const { data: registrationRows, error: registrationError } = await supabase
     .from('registrations')
-    .select('id, user_id, created_at, paid_at, amount_cents, space_requested, users(name, email)')
+    .select('id, user_id, created_at, paid_at, amount_cents, spaces_requested, users(name, email)')
     .eq('event_id', eventId)
     .order('created_at', { ascending: true });
 
@@ -505,7 +535,7 @@ export async function getEvent(
       email: showEmail ? email : null,
       paid: user.admin ? row.paid_at != null : null,
       amountCents: user.admin ? row.amount_cents : null,
-      spaceRequested: user.admin ? row.space_requested : null,
+      spacesRequested: user.admin ? asSpaceList(row.spaces_requested) : [],
       createdAt: row.created_at,
     };
   });
@@ -520,7 +550,7 @@ export async function getEvent(
       mine != null,
       mine?.paid_at != null,
       boothFee?.cents ?? null,
-      mine?.space_requested ?? null,
+      asSpaceList(mine?.spaces_requested),
     ),
     registrations,
   };
@@ -547,13 +577,13 @@ export async function createEvent(userId: string, input: EventInput): Promise<Ev
   }
 
   const boothFee = await getBoothFee(userId);
-  return toEventRecord(data as EventRow, 0, false, false, boothFee?.cents ?? null, null);
+  return toEventRecord(data as EventRow, 0, false, false, boothFee?.cents ?? null, []);
 }
 
 export async function updateEvent(eventId: string, input: EventInput): Promise<boolean> {
   const { data: registrations, error: registrationError } = await supabase
     .from('registrations')
-    .select('space_requested')
+    .select('spaces_requested')
     .eq('event_id', eventId);
   if (registrationError) {
     throw databaseFailure(registrationError.message);
@@ -564,11 +594,8 @@ export async function updateEvent(eventId: string, input: EventInput): Promise<b
     throw new DatabaseError(400, 'Capacity cannot be lower than the number of people already registered.');
   }
   const offered = new Set<string>(input.spacesAvailable);
-  const requestedSpaceRemoved = rows.some(
-    (row) =>
-      typeof row.space_requested === 'string' &&
-      spaceOrder.includes(row.space_requested as SpaceRequest) &&
-      !offered.has(row.space_requested),
+  const requestedSpaceRemoved = rows.some((row) =>
+    asSpaceList(row.spaces_requested).some((space) => !offered.has(space)),
   );
   if (requestedSpaceRemoved) {
     throw new DatabaseError(400, 'Someone is already registered for a space you removed.');
@@ -756,12 +783,12 @@ export async function markRegistrationPaid(
 export async function registerForEvent(
   eventId: string,
   userId: string,
-  spaceRequested: SpaceRequest,
+  spacesRequested: SpaceRequest[],
 ): Promise<void> {
   const { error } = await supabase.rpc('register_for_event', {
     p_event_id: eventId,
     p_user_id: userId,
-    p_space_requested: spaceRequested,
+    p_spaces_requested: spacesRequested,
   });
 
   if (!error) {
@@ -775,10 +802,13 @@ export async function registerForEvent(
     throw new DatabaseError(409, 'This event is full.');
   }
   if (error.message.includes('invalid_space')) {
-    throw new DatabaseError(400, 'Choose the space you are requesting.');
+    throw new DatabaseError(400, 'Choose at least one space.');
   }
   if (error.message.includes('space_unavailable')) {
-    throw new DatabaseError(400, 'That space is not available for this event.');
+    throw new DatabaseError(400, 'One of those spaces is not available for this event.');
+  }
+  if (error.message.includes('too_many_spaces')) {
+    throw new DatabaseError(400, 'Request 20 spaces or fewer.');
   }
   throw databaseFailure(error.message);
 }
@@ -827,7 +857,7 @@ async function selectEvents(): Promise<EventRow[]> {
 async function selectRegistrations(): Promise<RegistrationRow[]> {
   const { data, error } = await supabase
     .from('registrations')
-    .select('id, event_id, user_id, created_at, paid_at, space_requested');
+    .select('id, event_id, user_id, created_at, paid_at, spaces_requested');
   if (error) {
     throw databaseFailure(error.message);
   }
@@ -888,7 +918,7 @@ function toEventRecord(
   registered: boolean,
   paid: boolean,
   feeCents: number | null,
-  spaceRequested: string | null,
+  spacesRequested: SpaceRequest[],
 ): EventRecord {
   return {
     id: row.id,
@@ -902,7 +932,7 @@ function toEventRecord(
     registered,
     paid: registered && paid,
     feeCents,
-    spaceRequested: registered ? spaceRequested : null,
+    spacesRequested: registered ? spacesRequested : [],
     spacesAvailable: spacesAvailable(row.spaces_available),
     createdAt: row.created_at,
   };

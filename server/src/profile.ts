@@ -3,16 +3,30 @@ import type { Offering, SpaceRequest, VendorProfileInput } from './types.js';
 const SPACES = new Set<SpaceRequest>(['grass-generator', 'grass', 'food-truck', 'pavilion']);
 const OFFERINGS = new Set<Offering>(['retail', 'food', 'service', 'group', 'entertainment']);
 
-export function parseSpaceRequest(value: unknown): SpaceRequest {
-  if (!isSpace(value)) {
-    throw new ProfileError('Choose the space you are requesting.');
-  }
-  return value;
+export function parseAvailableSpaces(value: unknown): SpaceRequest[] {
+  return parseSpaceList(value, 'Choose at least one available space.');
 }
 
-export function parseAvailableSpaces(value: unknown): SpaceRequest[] {
+export function parseRequestedSpaces(value: unknown): SpaceRequest[] {
   if (!Array.isArray(value) || value.length === 0) {
-    throw new ProfileError('Choose at least one available space.');
+    throw new ProfileError('Choose at least one space.');
+  }
+  if (value.length > 20) {
+    throw new ProfileError('Request 20 spaces or fewer.');
+  }
+  const spaces: SpaceRequest[] = [];
+  for (const item of value) {
+    if (!isSpace(item)) {
+      throw new ProfileError('Choose a space from the list.');
+    }
+    spaces.push(item);
+  }
+  return spaces;
+}
+
+function parseSpaceList(value: unknown, emptyMessage: string): SpaceRequest[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new ProfileError(emptyMessage);
   }
   const spaces: SpaceRequest[] = [];
   for (const item of value) {
