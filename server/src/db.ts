@@ -675,6 +675,82 @@ export async function listAccounts(): Promise<AccountSummary[]> {
   return ((data ?? []) as AccountSummaryRow[]).map(toAccountSummary);
 }
 
+export type EmailAudience = 'vendors' | 'registered' | 'unpaid' | 'addresses';
+
+export function isEmailAudience(value: string): value is EmailAudience {
+  return value === 'vendors' || value === 'registered' || value === 'unpaid' || value === 'addresses';
+}
+
+export async function emailAudienceCounts(
+  eventId: string,
+): Promise<{ vendors: number; registered: number; unpaid: number } | null> {
+  if (!(await eventExists(eventId))) {
+    return null;
+  }
+  const [vendors, registered, unpaid] = await Promise.all([
+    listEmailRecipients('vendors', eventId),
+    listEmailRecipients('registered', eventId),
+    listEmailRecipients('unpaid', eventId),
+  ]);
+  return { vendors: vendors.length, registered: registered.length, unpaid: unpaid.length };
+}
+
+export async function listEmailRecipients(
+  audience: EmailAudience,
+  eventId: string,
+): Promise<{ name: string; email: string }[]> {
+  if (audience === 'addresses') {
+    return [];
+  }
+  if (audience === 'vendors') {
+    const { data, error } = await supabase.from('users').select('name, email');
+    if (error) {
+      throw databaseFailure(error.message);
+    }
+    return uniqueRecipients((data ?? []) as { name: string | null; email: string | null }[]);
+  }
+
+  const query = supabase.from('registrations').select('users(name, email)').eq('event_id', eventId);
+  const { data, error } = await (audience === 'unpaid' ? query.is('paid_at', null) : query);
+  if (error) {
+    throw databaseFailure(error.message);
+  }
+  return uniqueRecipients(
+    ((data ?? []) as RegistrationEmailRow[]).map((row) => {
+      const account = Array.isArray(row.users) ? row.users[0] : row.users;
+      return { name: account?.name ?? null, email: account?.email ?? null };
+    }),
+  );
+}
+
+async function eventExists(eventId: string): Promise<boolean> {
+  const { data, error } = await supabase.from('events').select('id').eq('id', eventId).maybeSingle();
+  if (error) {
+    throw databaseFailure(error.message);
+  }
+  return Boolean(data);
+}
+
+type RegistrationEmailRow = {
+  users: { name: string | null; email: string | null } | { name: string | null; email: string | null }[] | null;
+};
+
+function uniqueRecipients(rows: { name: string | null; email: string | null }[]): { name: string; email: string }[] {
+  const seen = new Set<string>();
+  const recipients: { name: string; email: string }[] = [];
+  for (const row of rows) {
+    const email = row.email?.trim() ?? '';
+    const key = email.toLowerCase();
+    if (!email.includes('@') || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    recipients.push({ name: row.name?.trim() || email, email });
+  }
+  recipients.sort((left, right) => left.name.localeCompare(right.name));
+  return recipients;
+}
+
 export async function getAccount(userId: string): Promise<AccountDetail | null> {
   const { data, error } = await supabase.from('users').select(accountDetailColumns).eq('id', userId).maybeSingle();
   if (error) {

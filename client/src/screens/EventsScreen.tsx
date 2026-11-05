@@ -17,11 +17,16 @@ import {
   confirmCheckout,
   createEvent,
   deleteEvent,
+  fetchEmailAudiences,
   fetchEvent,
   fetchEvents,
   markRegistrationPaid,
   registerForEvent,
+  sendEventEmail,
   startEventPayment,
+  type EmailAudience,
+  type EmailAudienceCounts,
+  type EmailImage,
   unregisterFromEvent,
   updateEvent,
   updateRegistrationSpaces,
@@ -35,6 +40,7 @@ import { Logo } from '../Logo';
 import { AccountDetailView, AccountList } from './UsersScreen';
 import { colors, pointer, serif } from '../theme';
 import { DateTimeInput } from './DateTimeInput';
+import { EmailMessageEditor } from './EmailMessageEditor';
 import { FormattedText } from './FormattedText';
 import { MapScreen } from './MapScreen';
 
@@ -418,6 +424,7 @@ function EventDetailView({
                 </Pressable>
               </View>
             ) : null}
+            {admin ? <EmailVendors token={token} eventId={event.id} /> : null}
             <Text style={styles.body}>{formatWhen(event.startsAt)}</Text>
             {event.endsAt ? <Text style={styles.muted}>Until {formatWhen(event.endsAt)}</Text> : null}
             {event.location ? <Text style={styles.body}>{event.location}</Text> : null}
@@ -868,6 +875,218 @@ function FormatButton({
     >
       <Text style={[styles.formatLabel, textStyle]}>{label}</Text>
     </Pressable>
+  );
+}
+
+const EMAIL_AUDIENCES: { id: EmailAudience; label: string }[] = [
+  { id: 'vendors', label: 'All vendors' },
+  { id: 'registered', label: 'Signed up for this event' },
+  { id: 'unpaid', label: 'Signed up and not paid' },
+  { id: 'addresses', label: 'Specific addresses' },
+];
+
+const RECIPIENT_ADDRESS = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+
+function recipientNoun(audience: EmailAudience, count: number): string {
+  if (audience === 'addresses') {
+    return count === 1 ? 'address' : 'addresses';
+  }
+  return count === 1 ? 'vendor' : 'vendors';
+}
+
+function parseAddressList(value: string): { emails: string[]; error: string | null } {
+  const parts = value
+    .split(/[\s,;]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length === 0) {
+    return { emails: [], error: null };
+  }
+  if (parts.length > 200) {
+    return { emails: [], error: 'Send to 200 addresses or fewer at a time.' };
+  }
+  const invalid = parts.filter((part) => !RECIPIENT_ADDRESS.test(part));
+  if (invalid.length > 0) {
+    return { emails: [], error: `These addresses are not valid: ${invalid.slice(0, 5).join(', ')}` };
+  }
+  const seen = new Set<string>();
+  const emails: string[] = [];
+  for (const part of parts) {
+    const key = part.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      emails.push(part);
+    }
+  }
+  return { emails, error: null };
+}
+
+function EmailVendors({ token, eventId }: { token: string; eventId: string }) {
+  const [open, setOpen] = useState(false);
+  const [audience, setAudience] = useState<EmailAudience>('registered');
+  const [subject, setSubject] = useState('');
+  const [message, setMessage] = useState('');
+  const [images, setImages] = useState<EmailImage[]>([]);
+  const [addresses, setAddresses] = useState('');
+  const [counts, setCounts] = useState<EmailAudienceCounts | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    let active = true;
+    fetchEmailAudiences(token, eventId)
+      .then((next) => {
+        if (active) {
+          setCounts(next);
+        }
+      })
+      .catch((reason: unknown) => {
+        if (active) {
+          setError(messageFrom(reason));
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [eventId, open, token]);
+
+  const addressList = parseAddressList(addresses);
+  const addressProblem = audience === 'addresses' ? addressList.error : null;
+  const count = audience === 'addresses' ? addressList.emails.length : (counts?.[audience] ?? null);
+
+  async function send() {
+    setBusy(true);
+    setError(null);
+    setResult(null);
+    try {
+      const sent = await sendEventEmail(
+        token,
+        eventId,
+        audience,
+        subject.trim(),
+        message.trim(),
+        images.filter((image) => message.includes(`cid:${image.id}`)),
+        addresses,
+      );
+      const failed = sent.failed.length === 0 ? '' : ` ${sent.failed.length} could not be sent.`;
+      setResult(`Sent to ${sent.sent} ${recipientNoun(audience, sent.sent)}.${failed}`);
+      if (sent.failed.length > 0) {
+        setError(sent.failed.map((item) => `${item.email}: ${item.error}`).join('\n'));
+      }
+      setConfirming(false);
+      setSubject('');
+      setMessage('');
+      setImages([]);
+    } catch (reason) {
+      setError(messageFrom(reason));
+      setConfirming(false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <View style={styles.emailBox}>
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => {
+          setOpen((shown) => !shown);
+          setConfirming(false);
+        }}
+        style={pointer}
+      >
+        <Text style={styles.back}>{open ? 'Close email' : 'Email vendors'}</Text>
+      </Pressable>
+      {open ? (
+        <View style={styles.emailForm}>
+          {EMAIL_AUDIENCES.map((option) => {
+            const selected = audience === option.id;
+            const optionCount = option.id === 'addresses' ? undefined : counts?.[option.id];
+            return (
+              <Pressable
+                key={option.id}
+                accessibilityRole="button"
+                accessibilityState={{ selected }}
+                onPress={() => {
+                  setAudience(option.id);
+                  setConfirming(false);
+                }}
+                style={[styles.choice, selected && styles.choiceSelected, pointer]}
+              >
+                <Text style={styles.choiceLabel}>
+                  {option.label}
+                  {option.id !== 'addresses' && optionCount != null ? ` (${optionCount})` : ''}
+                </Text>
+              </Pressable>
+            );
+          })}
+          {audience === 'addresses' ? (
+            <Field
+              label="Email addresses"
+              value={addresses}
+              onChangeText={(value) => {
+                setAddresses(value);
+                setConfirming(false);
+              }}
+              placeholder="One address per line, or separated by commas"
+              multiline
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          ) : null}
+          <Field label="Subject" value={subject} onChangeText={(value) => {
+            setSubject(value);
+            setConfirming(false);
+          }} />
+          <EmailMessageEditor
+            value={message}
+            images={images}
+            onChange={(value) => {
+              setMessage(value);
+              setConfirming(false);
+            }}
+            onImagesChange={(next) => {
+              setImages(next);
+              setConfirming(false);
+            }}
+            onError={setError}
+          />
+          {addressProblem ? <Text style={styles.warning}>{addressProblem}</Text> : null}
+          {audience !== 'addresses' && count === 0 ? <Text style={styles.muted}>No vendors match that choice.</Text> : null}
+          {error ? <ErrorText message={error} /> : null}
+          {result ? <Text style={styles.paidLabel}>{result}</Text> : null}
+          {confirming && count != null && count > 0 ? (
+            <Text style={styles.warning}>
+              Send this email to {count} {recipientNoun(audience, count)}?
+            </Text>
+          ) : null}
+          <Pressable
+            accessibilityRole="button"
+            disabled={busy || count === 0 || addressProblem != null || !subject.trim() || !message.trim()}
+            onPress={() => {
+              if (!confirming) {
+                setConfirming(true);
+                return;
+              }
+              void send();
+            }}
+            style={({ pressed }) => [
+              styles.primaryButton,
+              (busy || count === 0 || addressProblem != null || !subject.trim() || !message.trim()) && styles.disabled,
+              pressed && styles.pressed,
+              pointer,
+            ]}
+          >
+            <Text style={styles.primaryLabel}>{busy ? 'Sending…' : confirming ? 'Send email' : 'Review'}</Text>
+          </Pressable>
+        </View>
+      ) : null}
+    </View>
   );
 }
 
@@ -1359,6 +1578,12 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     alignItems: 'center',
     gap: 16,
+  },
+  emailBox: {
+    gap: 12,
+  },
+  emailForm: {
+    gap: 10,
   },
   error: {
     color: colors.danger,

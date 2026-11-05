@@ -338,3 +338,228 @@ export function decodeHtmlEntities(value: string): string {
     return String.fromCodePoint(code);
   });
 }
+
+const EMAIL_DROP = new Set(['script', 'style', 'iframe', 'object', 'embed', 'noscript', 'svg', 'math', 'textarea', 'form']);
+const EMAIL_TAGS = new Set(['b', 'i', 'u', 'p', 'div', 'br', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'a', 'span', 'img']);
+
+type EmailFrame = { name: string; open: boolean };
+
+export function sanitizeEmailHtml(input: string): string {
+  const source = input.replace(/\r\n?/g, '\n').replace(/\0/g, '').trim();
+  if (!source) {
+    return '';
+  }
+  if (!/<\/?[a-z]/i.test(source)) {
+    return escapeText(source).replace(/\n/g, '<br>');
+  }
+  return walkEmailHtml(source);
+}
+
+export function emailPlainText(html: string): string {
+  return decodeHtmlEntities(
+    html
+      .replace(/<img\b[^>]*\balt="([^"]*)"[^>]*>/gi, '\n[$1]\n')
+      .replace(/<img\b[^>]*>/gi, '\n[image]\n')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/(p|div|h[1-3]|li|ul|ol)>/gi, '\n')
+      .replace(/<[^>]+>/g, ''),
+  )
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function walkEmailHtml(source: string): string {
+  const out: string[] = [];
+  const stack: EmailFrame[] = [];
+  let skipUntil: string | null = null;
+  let index = 0;
+
+  while (index < source.length) {
+    if (source[index] !== '<') {
+      const next = source.indexOf('<', index);
+      const end = next === -1 ? source.length : next;
+      pushEmailText(out, source.slice(index, end), skipUntil != null);
+      index = end;
+      continue;
+    }
+
+    if (source.startsWith('<!--', index)) {
+      const end = source.indexOf('-->', index + 4);
+      index = end === -1 ? source.length : end + 3;
+      continue;
+    }
+
+    if (source.startsWith('<!', index) || source.startsWith('<?', index)) {
+      const end = source.indexOf('>', index + 2);
+      index = end === -1 ? source.length : end + 1;
+      continue;
+    }
+
+    const end = source.indexOf('>', index + 1);
+    if (end === -1) {
+      pushEmailText(out, source.slice(index), skipUntil != null);
+      break;
+    }
+
+    const raw = source.slice(index + 1, end);
+    index = end + 1;
+    const parsed = parseTag(raw);
+    if (!parsed) {
+      pushEmailText(out, `<${raw}>`, skipUntil != null);
+      continue;
+    }
+
+    if (skipUntil) {
+      if (parsed.closing && parsed.name === skipUntil) {
+        skipUntil = null;
+      }
+      continue;
+    }
+
+    if (EMAIL_DROP.has(parsed.name)) {
+      if (!parsed.closing && !parsed.selfClosing) {
+        skipUntil = parsed.name;
+      }
+      continue;
+    }
+
+    const name = emailTagName(parsed.name);
+    if (!name) {
+      continue;
+    }
+
+    if (name === 'br') {
+      if (!parsed.closing) {
+        out.push('<br>');
+      }
+      continue;
+    }
+
+    if (name === 'img') {
+      const image = emailImageTag(raw);
+      if (image) {
+        out.push(image);
+      }
+      continue;
+    }
+
+    if (parsed.closing) {
+      closeEmailFrame(out, stack, name);
+      continue;
+    }
+
+    const open = emailOpenTag(name, raw);
+    stack.push({ name, open: open != null });
+    if (open) {
+      out.push(open);
+    }
+    if (parsed.selfClosing) {
+      closeEmailFrame(out, stack, name);
+    }
+  }
+
+  while (stack.length > 0) {
+    const frame = stack.pop();
+    if (frame?.open) {
+      out.push(`</${frame.name}>`);
+    }
+  }
+
+  return out.join('').replace(/(?:<br>){3,}/g, '<br><br>').trim();
+}
+
+function emailTagName(name: string): string | null {
+  if (name === 'strong') {
+    return 'b';
+  }
+  if (name === 'em') {
+    return 'i';
+  }
+  return EMAIL_TAGS.has(name) ? name : null;
+}
+
+function emailOpenTag(name: string, raw: string): string | null {
+  if (name === 'a') {
+    const href = safeEmailHref(raw);
+    return href ? `<a href="${escapeText(href).replace(/"/g, '&quot;')}">` : null;
+  }
+  if (name === 'span') {
+    const fontSize = readFontSize(raw);
+    return fontSize ? `<span style="font-size: ${fontSize}px">` : null;
+  }
+  return `<${name}>`;
+}
+
+function emailImageTag(raw: string): string | null {
+  const src = readAttr(raw, 'src');
+  if (!src || /[\u0000-\u0020<>"']/.test(src)) {
+    return null;
+  }
+  const alt = escapeText(readAttr(raw, 'alt') ?? '').replace(/"/g, '&quot;');
+  const tag = (safeSrc: string) => `<img src="${safeSrc}" alt="${alt}" style="max-width:100%;height:auto">`;
+  if (/^cid:[A-Za-z0-9._-]{1,64}$/.test(src)) {
+    return tag(src);
+  }
+  if (/^https:\/\//i.test(src)) {
+    return tag(escapeText(src).replace(/"/g, '&quot;'));
+  }
+  return null;
+}
+
+function readAttr(raw: string, name: string): string | null {
+  const match = new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'=<>\`]+))`, 'i').exec(raw);
+  const value = decodeHtmlEntities((match?.[1] ?? match?.[2] ?? match?.[3] ?? '').trim());
+  return value || null;
+}
+
+function safeEmailHref(rawTag: string): string | null {
+  const match = /\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/i.exec(rawTag);
+  const value = decodeHtmlEntities((match?.[1] ?? match?.[2] ?? match?.[3] ?? '').trim());
+  if (!value || /[\u0000-\u0020<>"']/.test(value)) {
+    return null;
+  }
+  if (/^https?:\/\//i.test(value)) {
+    return value;
+  }
+  if (/^mailto:/i.test(value)) {
+    const address = value.slice('mailto:'.length).split('?')[0] ?? '';
+    if (!/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(address)) {
+      return null;
+    }
+    return `mailto:${address}`;
+  }
+  return null;
+}
+
+function closeEmailFrame(out: string[], stack: EmailFrame[], name: string) {
+  let found = -1;
+  for (let index = stack.length - 1; index >= 0; index -= 1) {
+    if (stack[index]?.name === name) {
+      found = index;
+      break;
+    }
+  }
+  if (found === -1) {
+    return;
+  }
+  while (stack.length > found) {
+    const frame = stack.pop();
+    if (frame?.open) {
+      out.push(`</${frame.name}>`);
+    }
+  }
+}
+
+function pushEmailText(out: string[], chunk: string, skipped: boolean) {
+  if (skipped || !chunk) {
+    return;
+  }
+  const decoded = decodeHtmlEntities(chunk);
+  if (!decoded.trim()) {
+    if (/[ \t]/.test(decoded)) {
+      out.push(' ');
+    }
+    return;
+  }
+  out.push(escapeText(decoded).replace(/\n/g, '<br>'));
+}

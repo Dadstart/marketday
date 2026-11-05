@@ -29,6 +29,10 @@ export const googleClientIds = [
 export const microsoftClientId = optional('EXPO_PUBLIC_MICROSOFT_CLIENT_ID');
 export const stripeTestSecretKey = optional('STRIPE_TEST_SECRET_KEY');
 export const stripeLiveSecretKey = optional('STRIPE_LIVE_SECRET_KEY');
+export const awsRegion = optional('AWS_REGION');
+export const awsAccessKeyId = optional('AWS_ACCESS_KEY_ID');
+export const awsSecretAccessKey = optional('AWS_SECRET_ACCESS_KEY');
+export const sesFromEmail = optional('SES_FROM_EMAIL');
 
 if (
   stripeLiveSecretKey &&

@@ -23,6 +23,8 @@ The database is the Supabase project at `https://fiwpwhgcyhaujunmcdxw.supabase.c
 
 Booth fees are charged with Stripe Checkout. A live secret key (`STRIPE_LIVE_SECRET_KEY`) is used when it is set. Otherwise the server uses `STRIPE_TEST_SECRET_KEY`. Either key stays on the server. A Crosswinds resident pays $5. Anyone else pays $10. Registration is saved either way, and an unpaid registration is highlighted on the events page until Stripe reports the payment. Canceling a paid registration refunds that booth fee through Stripe before the signup is removed.
 
+An administrator can email every vendor, the vendors signed up for an event, the signed-up vendors who have not paid, or a list of email addresses. The server sends each message through Amazon SES. Set `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `SES_FROM_EMAIL` in `.env`, then restart the API. In SES, verify that From identity and request production access. While the account is in the sandbox, SES only delivers to verified addresses. The message editor can apply bold, italic, underline, headings, lists, links, and a font size. Images chosen in the editor are embedded in the email. Other HTML tags are removed.
+
 The service role key is used only by the server. Row level security blocks the anon and publishable keys. Authenticated requests carry a session issued after the Google or Microsoft identity token is verified. A Google account and a Microsoft account with the same email are the same user. Creating an event is limited to `andrew@bishop4.com` and `louise@bishop4.com`.
 
 iOS and Android sign-in need a development build so the OAuth redirect can open this app's URL scheme.
