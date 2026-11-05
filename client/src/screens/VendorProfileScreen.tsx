@@ -15,7 +15,13 @@ const OFFERING_OPTIONS = [
   { id: 'entertainment', label: 'Entertainment' },
 ] as const;
 
-export function VendorProfileScreen({ onBack }: { onBack?: () => void }) {
+export function VendorProfileScreen({
+  onBack,
+  embedded = false,
+}: {
+  onBack?: () => void;
+  embedded?: boolean;
+}) {
   const editing = onBack != null;
   const { token, user, updateUser, signOut } = useAuth();
   const [venmo, setVenmo] = useState('');
@@ -112,18 +118,17 @@ export function VendorProfileScreen({ onBack }: { onBack?: () => void }) {
   return (
     <ScrollView style={styles.flex} contentContainerStyle={styles.content}>
       <View style={styles.column}>
-        <Logo />
-        <View style={styles.header}>
-          <Text style={styles.eyebrow}>COMMUNITY DAY</Text>
-          <Pressable accessibilityRole="button" onPress={signOut} style={pointer}>
-            <Text style={styles.signOut}>Sign out</Text>
-          </Pressable>
-        </View>
-        {onBack ? (
-          <Pressable accessibilityRole="button" onPress={onBack} style={pointer}>
-            <Text style={styles.signOut}>Events</Text>
-          </Pressable>
-        ) : null}
+        {embedded ? null : (
+          <>
+            <Logo />
+            <View style={styles.header}>
+              <Text style={styles.eyebrow}>COMMUNITY DAY</Text>
+              <Pressable accessibilityRole="button" onPress={signOut} style={pointer}>
+                <Text style={styles.signOut}>Sign out</Text>
+              </Pressable>
+            </View>
+          </>
+        )}
         <Text style={styles.title} accessibilityRole="header">
           {editing ? 'Your profile' : 'Tell us about your business'}
         </Text>

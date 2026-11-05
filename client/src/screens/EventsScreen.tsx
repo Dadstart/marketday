@@ -44,6 +44,7 @@ import { DateTimeInput } from './DateTimeInput';
 import { EmailMessageEditor } from './EmailMessageEditor';
 import { FormattedText } from './FormattedText';
 import { MapScreen } from './MapScreen';
+import { VendorProfileScreen } from './VendorProfileScreen';
 
 const SPACE_OPTIONS = [
   { id: 'grass-generator', label: '10x10 grass plus generator' },
@@ -78,9 +79,20 @@ type Screen =
   | { name: 'edit'; event: EventSummary }
   | { name: 'map'; id: string }
   | { name: 'users' }
-  | { name: 'account'; id: string; back: 'users' | 'detail'; eventId?: string };
+  | { name: 'account'; id: string; back: 'users' | 'detail'; eventId?: string }
+  | { name: 'profile' };
 
-export function EventsScreen({ onEditProfile }: { onEditProfile: () => void }) {
+function sectionFor(screen: Screen): 'events' | 'users' | 'profile' {
+  if (screen.name === 'profile') {
+    return 'profile';
+  }
+  if (screen.name === 'users' || (screen.name === 'account' && screen.back !== 'detail')) {
+    return 'users';
+  }
+  return 'events';
+}
+
+export function EventsScreen() {
   const { token, user, signOut } = useAuth();
   const [screen, setScreen] = useState<Screen>({ name: 'list' });
 
@@ -88,35 +100,37 @@ export function EventsScreen({ onEditProfile }: { onEditProfile: () => void }) {
     return null;
   }
 
+  const section = sectionFor(screen);
+
   return (
     <View style={styles.flex}>
       <View style={styles.header}>
-        <Logo />
-        <View style={styles.headerRow}>
-          <View style={styles.headerText}>
-            <Text style={styles.eyebrow}>COMMUNITY DAY</Text>
-            <Text style={styles.headerName} numberOfLines={1}>
-              {user.name}
-              {user.admin ? ' · Administrator' : ''}
-            </Text>
-          </View>
-          <View style={styles.headerActions}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Events"
+          onPress={() => setScreen({ name: 'list' })}
+          style={[styles.logoButton, pointer]}
+        >
+          <Logo />
+        </Pressable>
+        <View style={styles.headerText}>
+          <Text style={styles.eyebrow}>COMMUNITY DAY</Text>
+          <Text style={styles.headerName} numberOfLines={1}>
+            {user.name}
+            {user.admin ? ' · Administrator' : ''}
+          </Text>
+        </View>
+        <View style={styles.navRow}>
+          <View style={styles.navTabs}>
+            <NavTab label="Events" selected={section === 'events'} onPress={() => setScreen({ name: 'list' })} />
             {user.admin ? (
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => setScreen({ name: 'users' })}
-                style={pointer}
-              >
-                <Text style={styles.signOut}>Users</Text>
-              </Pressable>
+              <NavTab label="Users" selected={section === 'users'} onPress={() => setScreen({ name: 'users' })} />
             ) : null}
-            <Pressable accessibilityRole="button" onPress={onEditProfile} style={pointer}>
-              <Text style={styles.signOut}>Profile</Text>
-            </Pressable>
-            <Pressable accessibilityRole="button" onPress={signOut} style={pointer}>
-              <Text style={styles.signOut}>Sign out</Text>
-            </Pressable>
+            <NavTab label="Profile" selected={section === 'profile'} onPress={() => setScreen({ name: 'profile' })} />
           </View>
+          <Pressable accessibilityRole="button" onPress={signOut} style={pointer}>
+            <Text style={styles.signOut}>Sign out</Text>
+          </Pressable>
         </View>
       </View>
       {screen.name === 'list' ? (
@@ -139,12 +153,9 @@ export function EventsScreen({ onEditProfile }: { onEditProfile: () => void }) {
         />
       ) : null}
       {screen.name === 'users' ? (
-        <AccountList
-          token={token}
-          onBack={() => setScreen({ name: 'list' })}
-          onOpen={(id) => setScreen({ name: 'account', id, back: 'users' })}
-        />
+        <AccountList token={token} onOpen={(id) => setScreen({ name: 'account', id, back: 'users' })} />
       ) : null}
+      {screen.name === 'profile' ? <VendorProfileScreen embedded onBack={() => setScreen({ name: 'list' })} /> : null}
       {screen.name === 'account' ? (
         <AccountDetailView
           token={token}
@@ -177,6 +188,19 @@ export function EventsScreen({ onEditProfile }: { onEditProfile: () => void }) {
         <MapScreen token={token} eventId={screen.id} onBack={() => setScreen({ name: 'detail', id: screen.id })} />
       ) : null}
     </View>
+  );
+}
+
+function NavTab({ label, selected, onPress }: { label: string; selected: boolean; onPress: () => void }) {
+  return (
+    <Pressable
+      accessibilityRole="tab"
+      accessibilityState={{ selected }}
+      onPress={onPress}
+      style={[styles.navTab, selected && styles.navTabSelected, pointer]}
+    >
+      <Text style={[styles.navTabLabel, selected && styles.navTabLabelSelected]}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -1376,19 +1400,40 @@ const styles = StyleSheet.create({
   header: {
     paddingHorizontal: 24,
     paddingTop: 12,
-    paddingBottom: 8,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line,
+    gap: 8,
   },
-  headerRow: {
+  headerText: { flexShrink: 1 },
+  logoButton: { alignSelf: 'flex-start' },
+  navRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 16,
+    flexWrap: 'wrap',
+    gap: 12,
   },
-  headerText: { flex: 1 },
-  headerActions: {
+  navTabs: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  navTab: {
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  navTabSelected: {
+    backgroundColor: colors.accent,
+  },
+  navTabLabel: {
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  navTabLabelSelected: {
+    color: colors.inverseText,
   },
   eyebrow: {
     color: colors.muted,
@@ -1407,6 +1452,7 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingHorizontal: 24,
+    paddingTop: 20,
     paddingBottom: 40,
   },
   column: {

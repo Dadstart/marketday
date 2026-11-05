@@ -31,15 +31,7 @@ function knownOffering(offering: string | null): VendorProfileInput['offering'] 
   return OFFERING_OPTIONS.some((option) => option.id === offering) ? (offering as VendorProfileInput['offering']) : null;
 }
 
-export function AccountList({
-  token,
-  onOpen,
-  onBack,
-}: {
-  token: string;
-  onOpen: (id: string) => void;
-  onBack: () => void;
-}) {
+export function AccountList({ token, onOpen }: { token: string; onOpen: (id: string) => void }) {
   const [users, setUsers] = useState<AccountSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -57,9 +49,6 @@ export function AccountList({
   return (
     <ScrollView style={styles.flex} contentContainerStyle={styles.content}>
       <View style={styles.column}>
-        <Pressable accessibilityRole="button" onPress={onBack} style={pointer}>
-          <Text style={styles.back}>Events</Text>
-        </Pressable>
         <Text style={styles.title} accessibilityRole="header">
           Users
         </Text>
@@ -363,6 +352,7 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   content: {
     paddingHorizontal: 24,
+    paddingTop: 20,
     paddingBottom: 40,
   },
   column: {

@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import * as WebBrowser from 'expo-web-browser';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
@@ -30,15 +29,12 @@ export default function App() {
 
 function Root() {
   const { user, ready } = useAuth();
-  const [editingProfile, setEditingProfile] = useState(false);
 
   let screen = <SignInScreen />;
   if (user && !user.admin && !user.profileComplete) {
     screen = <VendorProfileScreen />;
-  } else if (user && editingProfile) {
-    screen = <VendorProfileScreen onBack={() => setEditingProfile(false)} />;
   } else if (user) {
-    screen = <EventsScreen onEditProfile={() => setEditingProfile(true)} />;
+    screen = <EventsScreen />;
   }
 
   return (
