@@ -193,6 +193,7 @@ export function VendorProfileScreen({ onBack }: { onBack?: () => void }) {
           placeholder="Optional"
         />
 
+        {error ? <Text style={styles.error}>{error}</Text> : null}
         <Pressable
           accessibilityRole="button"
           disabled={busy || loading}

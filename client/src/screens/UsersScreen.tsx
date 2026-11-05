@@ -281,6 +281,7 @@ function AccountEditor({
         placeholder="Only administrators can see this"
         multiline
       />
+      {error ? <Text style={styles.error}>{error}</Text> : null}
       <View style={styles.choiceRow}>
         <Pressable
           accessibilityRole="button"
