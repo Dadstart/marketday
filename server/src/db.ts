@@ -675,10 +675,10 @@ export async function listAccounts(): Promise<AccountSummary[]> {
   return ((data ?? []) as AccountSummaryRow[]).map(toAccountSummary);
 }
 
-export type EmailAudience = 'vendors' | 'registered' | 'unpaid';
+export type EmailAudience = 'vendors' | 'registered' | 'unpaid' | 'addresses';
 
 export function isEmailAudience(value: string): value is EmailAudience {
-  return value === 'vendors' || value === 'registered' || value === 'unpaid';
+  return value === 'vendors' || value === 'registered' || value === 'unpaid' || value === 'addresses';
 }
 
 export async function emailAudienceCounts(
@@ -699,6 +699,9 @@ export async function listEmailRecipients(
   audience: EmailAudience,
   eventId: string,
 ): Promise<{ name: string; email: string }[]> {
+  if (audience === 'addresses') {
+    return [];
+  }
   if (audience === 'vendors') {
     const { data, error } = await supabase.from('users').select('name, email');
     if (error) {

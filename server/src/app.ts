@@ -361,9 +361,10 @@ app.post('/events/:id/email', async (c) => {
   if (!(await emailAudienceCounts(eventId))) {
     throw new HttpError(404, 'That event does not exist.');
   }
-  const recipients = await listEmailRecipients(audience, eventId);
+  const recipients =
+    audience === 'addresses' ? parseRecipientAddresses(body.addresses) : await listEmailRecipients(audience, eventId);
   if (recipients.length === 0) {
-    throw new HttpError(400, 'No vendors match that choice.');
+    throw new HttpError(400, audience === 'addresses' ? 'Enter at least one email address.' : 'No vendors match that choice.');
   }
   const result = await sendVendorEmails({
     replyTo: admin.email,
@@ -618,6 +619,39 @@ const EMAIL_IMAGE_EXTENSIONS: Record<string, string> = {
   'image/gif': 'gif',
   'image/webp': 'webp',
 };
+
+const RECIPIENT_ADDRESS = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+
+function parseRecipientAddresses(value: unknown): { email: string }[] {
+  if (typeof value !== 'string') {
+    throw new HttpError(400, 'Enter the email addresses.');
+  }
+  const parts = value
+    .split(/[\s,;]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length === 0) {
+    throw new HttpError(400, 'Enter at least one email address.');
+  }
+  if (parts.length > 200) {
+    throw new HttpError(400, 'Send to 200 addresses or fewer at a time.');
+  }
+  const invalid = parts.filter((part) => !RECIPIENT_ADDRESS.test(part));
+  if (invalid.length > 0) {
+    throw new HttpError(400, `These addresses are not valid: ${invalid.slice(0, 5).join(', ')}`);
+  }
+  const seen = new Set<string>();
+  const recipients: { email: string }[] = [];
+  for (const part of parts) {
+    const key = part.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    recipients.push({ email: part });
+  }
+  return recipients;
+}
 
 function parseEmailImages(value: unknown, html: string) {
   if (value == null) {

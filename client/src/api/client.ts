@@ -266,7 +266,7 @@ export type EmailImage = {
   data: string;
 };
 
-export type EmailAudience = 'vendors' | 'registered' | 'unpaid';
+export type EmailAudience = 'vendors' | 'registered' | 'unpaid' | 'addresses';
 
 export type EmailAudienceCounts = {
   vendors: number;
@@ -285,10 +285,11 @@ export function sendEventEmail(
   subject: string,
   text: string,
   images: EmailImage[],
+  addresses: string,
 ): Promise<{ sent: number; failed: { email: string; error: string }[] }> {
   return request(`/events/${eventId}/email`, token, {
     method: 'POST',
-    body: JSON.stringify({ audience, subject, text, images }),
+    body: JSON.stringify({ audience, subject, text, images, addresses }),
   });
 }
 

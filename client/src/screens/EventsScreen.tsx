@@ -882,7 +882,44 @@ const EMAIL_AUDIENCES: { id: EmailAudience; label: string }[] = [
   { id: 'vendors', label: 'All vendors' },
   { id: 'registered', label: 'Signed up for this event' },
   { id: 'unpaid', label: 'Signed up and not paid' },
+  { id: 'addresses', label: 'Specific addresses' },
 ];
+
+const RECIPIENT_ADDRESS = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+
+function recipientNoun(audience: EmailAudience, count: number): string {
+  if (audience === 'addresses') {
+    return count === 1 ? 'address' : 'addresses';
+  }
+  return count === 1 ? 'vendor' : 'vendors';
+}
+
+function parseAddressList(value: string): { emails: string[]; error: string | null } {
+  const parts = value
+    .split(/[\s,;]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length === 0) {
+    return { emails: [], error: null };
+  }
+  if (parts.length > 200) {
+    return { emails: [], error: 'Send to 200 addresses or fewer at a time.' };
+  }
+  const invalid = parts.filter((part) => !RECIPIENT_ADDRESS.test(part));
+  if (invalid.length > 0) {
+    return { emails: [], error: `These addresses are not valid: ${invalid.slice(0, 5).join(', ')}` };
+  }
+  const seen = new Set<string>();
+  const emails: string[] = [];
+  for (const part of parts) {
+    const key = part.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      emails.push(part);
+    }
+  }
+  return { emails, error: null };
+}
 
 function EmailVendors({ token, eventId }: { token: string; eventId: string }) {
   const [open, setOpen] = useState(false);
@@ -890,6 +927,7 @@ function EmailVendors({ token, eventId }: { token: string; eventId: string }) {
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
   const [images, setImages] = useState<EmailImage[]>([]);
+  const [addresses, setAddresses] = useState('');
   const [counts, setCounts] = useState<EmailAudienceCounts | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -917,7 +955,9 @@ function EmailVendors({ token, eventId }: { token: string; eventId: string }) {
     };
   }, [eventId, open, token]);
 
-  const count = counts?.[audience] ?? null;
+  const addressList = parseAddressList(addresses);
+  const addressProblem = audience === 'addresses' ? addressList.error : null;
+  const count = audience === 'addresses' ? addressList.emails.length : (counts?.[audience] ?? null);
 
   async function send() {
     setBusy(true);
@@ -931,11 +971,10 @@ function EmailVendors({ token, eventId }: { token: string; eventId: string }) {
         subject.trim(),
         message.trim(),
         images.filter((image) => message.includes(`cid:${image.id}`)),
+        addresses,
       );
       const failed = sent.failed.length === 0 ? '' : ` ${sent.failed.length} could not be sent.`;
-      setResult(
-        sent.sent === 1 ? `Sent to 1 vendor.${failed}` : `Sent to ${sent.sent} vendors.${failed}`,
-      );
+      setResult(`Sent to ${sent.sent} ${recipientNoun(audience, sent.sent)}.${failed}`);
       if (sent.failed.length > 0) {
         setError(sent.failed.map((item) => `${item.email}: ${item.error}`).join('\n'));
       }
@@ -967,7 +1006,7 @@ function EmailVendors({ token, eventId }: { token: string; eventId: string }) {
         <View style={styles.emailForm}>
           {EMAIL_AUDIENCES.map((option) => {
             const selected = audience === option.id;
-            const optionCount = counts?.[option.id];
+            const optionCount = option.id === 'addresses' ? undefined : counts?.[option.id];
             return (
               <Pressable
                 key={option.id}
@@ -981,11 +1020,25 @@ function EmailVendors({ token, eventId }: { token: string; eventId: string }) {
               >
                 <Text style={styles.choiceLabel}>
                   {option.label}
-                  {optionCount != null ? ` (${optionCount})` : ''}
+                  {option.id !== 'addresses' && optionCount != null ? ` (${optionCount})` : ''}
                 </Text>
               </Pressable>
             );
           })}
+          {audience === 'addresses' ? (
+            <Field
+              label="Email addresses"
+              value={addresses}
+              onChangeText={(value) => {
+                setAddresses(value);
+                setConfirming(false);
+              }}
+              placeholder="One address per line, or separated by commas"
+              multiline
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          ) : null}
           <Field label="Subject" value={subject} onChangeText={(value) => {
             setSubject(value);
             setConfirming(false);
@@ -1003,17 +1056,18 @@ function EmailVendors({ token, eventId }: { token: string; eventId: string }) {
             }}
             onError={setError}
           />
-          {count === 0 ? <Text style={styles.muted}>No vendors match that choice.</Text> : null}
+          {addressProblem ? <Text style={styles.warning}>{addressProblem}</Text> : null}
+          {audience !== 'addresses' && count === 0 ? <Text style={styles.muted}>No vendors match that choice.</Text> : null}
           {error ? <ErrorText message={error} /> : null}
           {result ? <Text style={styles.paidLabel}>{result}</Text> : null}
           {confirming && count != null && count > 0 ? (
             <Text style={styles.warning}>
-              Send this email to {count} {count === 1 ? 'vendor' : 'vendors'}?
+              Send this email to {count} {recipientNoun(audience, count)}?
             </Text>
           ) : null}
           <Pressable
             accessibilityRole="button"
-            disabled={busy || count === 0 || !subject.trim() || !message.trim()}
+            disabled={busy || count === 0 || addressProblem != null || !subject.trim() || !message.trim()}
             onPress={() => {
               if (!confirming) {
                 setConfirming(true);
@@ -1023,7 +1077,7 @@ function EmailVendors({ token, eventId }: { token: string; eventId: string }) {
             }}
             style={({ pressed }) => [
               styles.primaryButton,
-              (busy || count === 0 || !subject.trim() || !message.trim()) && styles.disabled,
+              (busy || count === 0 || addressProblem != null || !subject.trim() || !message.trim()) && styles.disabled,
               pressed && styles.pressed,
               pointer,
             ]}
