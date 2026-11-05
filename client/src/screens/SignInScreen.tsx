@@ -18,7 +18,7 @@ export function SignInScreen() {
     <ScrollView style={styles.flex} contentContainerStyle={styles.content}>
       <View style={styles.card}>
         <Logo />
-        <Text style={styles.eyebrow}>MARKET DAY</Text>
+        <Text style={styles.eyebrow}>COMMUNITY DAY</Text>
         <Text style={styles.title} accessibilityRole="header">
           Sign in
         </Text>

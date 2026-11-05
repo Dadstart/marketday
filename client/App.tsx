@@ -5,6 +5,7 @@ import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 import { AuthProvider, useAuth } from './src/auth/AuthProvider';
+import { isWebSignInReturn } from './src/auth/webRedirect';
 import { EventsScreen } from './src/screens/EventsScreen';
 import { SignInScreen } from './src/screens/SignInScreen';
 import { VendorProfileScreen } from './src/screens/VendorProfileScreen';
@@ -13,7 +14,7 @@ import { colors } from './src/theme';
 const authPopup = WebBrowser.maybeCompleteAuthSession();
 
 export default function App() {
-  if (authPopup.type === 'success') {
+  if (authPopup.type === 'success' && !isWebSignInReturn()) {
     return null;
   }
 

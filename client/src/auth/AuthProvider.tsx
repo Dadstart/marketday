@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { Platform } from 'react-native';
 
+import { resumeWebRedirect } from './webRedirect';
 import { errorMessage } from './sessionFromAuth';
 import { clearSession, readSession, writeSession } from './storage';
 import type { AuthProviderName, ProviderCredential, SessionUser } from './types';
@@ -49,7 +50,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let active = true;
-    readSession().then(async (session) => {
+
+    async function restore() {
+      try {
+        const credential = await resumeWebRedirect();
+        if (!active) {
+          return;
+        }
+        if (credential) {
+          const session = await createApiSession(credential);
+          if (!active) {
+            return;
+          }
+          await writeSession(session);
+          setToken(session.token);
+          setUser(session.user);
+          setReady(true);
+          return;
+        }
+      } catch (reason) {
+        if (!active) {
+          return;
+        }
+        setError(errorMessage(reason, 'Sign-in failed.'));
+        setReady(true);
+        return;
+      }
+
+      const session = await readSession();
       if (!active) {
         return;
       }
@@ -78,7 +106,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       }
       setReady(true);
-    });
+    }
+
+    void restore();
     return () => {
       active = false;
     };

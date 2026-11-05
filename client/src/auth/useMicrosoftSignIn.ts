@@ -4,6 +4,7 @@ import {
   type DiscoveryDocument,
 } from 'expo-auth-session';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Platform } from 'react-native';
 
 import {
   MICROSOFT_ISSUER,
@@ -12,6 +13,7 @@ import {
   microsoftClientId,
   microsoftRedirectUri,
 } from './config';
+import { startWebRedirect } from './webRedirect';
 import { sessionFromAuthResult } from './sessionFromAuth';
 import type { ProviderCredential } from './types';
 
@@ -36,6 +38,18 @@ export function useMicrosoftSignIn() {
   const prompt = useCallback(async (): Promise<ProviderCredential | null> => {
     if (!configured || !microsoftClientId || !request || !discovery?.tokenEndpoint) {
       throw new Error('Microsoft sign-in is not configured.');
+    }
+
+    if (Platform.OS === 'web') {
+      startWebRedirect({
+        provider: 'microsoft',
+        request,
+        clientId: microsoftClientId,
+        redirectUri,
+      });
+      return new Promise<ProviderCredential | null>(() => {
+        // The browser leaves this page for Microsoft and comes back at the redirect URI.
+      });
     }
 
     const result = await promptAsync();

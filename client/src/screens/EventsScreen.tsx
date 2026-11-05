@@ -13,17 +13,21 @@ import {
 } from 'react-native';
 
 import {
+  cancelRegistration,
   confirmCheckout,
   createEvent,
   deleteEvent,
   fetchEvent,
   fetchEvents,
+  markRegistrationPaid,
   registerForEvent,
   startEventPayment,
   unregisterFromEvent,
   updateEvent,
+  updateRegistrationSpaces,
   type EventDetail,
   type EventSummary,
+  type RegistrationSummary,
 } from '../api/client';
 import { useAuth } from '../auth/AuthProvider';
 import { descriptionForEditor } from '../description';
@@ -40,11 +44,23 @@ const SPACE_OPTIONS = [
   { id: 'pavilion', label: '10x10 pavilion' },
 ] as const;
 
-function spaceLabel(id: string | null): string {
-  if (!id) {
+const MAX_SPACES = 20;
+
+function spaceLabel(id: string): string {
+  return SPACE_OPTIONS.find((option) => option.id === id)?.label ?? id;
+}
+
+function spacesLabel(ids: string[]): string {
+  if (ids.length === 0) {
     return 'Not chosen';
   }
-  return SPACE_OPTIONS.find((option) => option.id === id)?.label ?? id;
+  return SPACE_OPTIONS.flatMap((option) => {
+    const count = ids.filter((id) => id === option.id).length;
+    if (count === 0) {
+      return [];
+    }
+    return [count === 1 ? option.label : `${option.label} × ${count}`];
+  }).join(', ');
 }
 
 type Screen =
@@ -69,7 +85,7 @@ export function EventsScreen({ onEditProfile }: { onEditProfile: () => void }) {
         <Logo />
         <View style={styles.headerRow}>
           <View style={styles.headerText}>
-            <Text style={styles.eyebrow}>MARKET DAY</Text>
+            <Text style={styles.eyebrow}>COMMUNITY DAY</Text>
             <Text style={styles.headerName} numberOfLines={1}>
               {user.name}
               {user.admin ? ' · Administrator' : ''}
@@ -269,7 +285,7 @@ function EventDetailView({
   const [detail, setDetail] = useState<EventDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [spaceRequested, setSpaceRequested] = useState<(typeof SPACE_OPTIONS)[number]['id'] | null>(null);
+  const [selectedSpaces, setSelectedSpaces] = useState<(typeof SPACE_OPTIONS)[number]['id'][]>([]);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleteText, setDeleteText] = useState('');
   const [deleting, setDeleting] = useState(false);
@@ -287,8 +303,18 @@ function EventDetailView({
 
   const event = detail?.event;
   const availableSpaces = SPACE_OPTIONS.filter((option) => event?.spacesAvailable.includes(option.id));
-  const selectedSpace = availableSpaces.some((option) => option.id === spaceRequested) ? spaceRequested : null;
+  const chosenSpaces = selectedSpaces.filter((id) => availableSpaces.some((option) => option.id === id));
   const full = event?.capacity != null && event.registrationCount >= event.capacity && !event.registered;
+  const refundable = Boolean(event?.refundable);
+  const refundClosed = Boolean(refundable && event && eventHasStarted(event.startsAt));
+
+  function setSpaceCount(id: (typeof SPACE_OPTIONS)[number]['id'], count: number) {
+    const next = Math.max(0, Math.min(MAX_SPACES, count));
+    setSelectedSpaces((current) => [
+      ...current.filter((item) => item !== id),
+      ...Array.from({ length: next }, () => id),
+    ]);
+  }
 
   async function pay() {
     if (!event) {
@@ -340,8 +366,8 @@ function EventDetailView({
     if (!event) {
       return;
     }
-    if (!event.registered && !selectedSpace) {
-      setError('Choose the space you are requesting.');
+    if (!event.registered && chosenSpaces.length === 0) {
+      setError('Choose at least one space.');
       return;
     }
     const canceling = event.registered;
@@ -351,7 +377,7 @@ function EventDetailView({
       if (canceling) {
         await unregisterFromEvent(token, event.id);
       } else {
-        await registerForEvent(token, event.id, selectedSpace as (typeof SPACE_OPTIONS)[number]['id']);
+        await registerForEvent(token, event.id, chosenSpaces);
       }
       onBack();
     } catch (reason) {
@@ -389,28 +415,50 @@ function EventDetailView({
               Spaces available: {event.spacesAvailable.map((id) => spaceLabel(id)).join(', ') || 'None'}
             </Text>
             {event.registered ? (
-              <Text style={styles.body}>Space requested: {spaceLabel(event.spaceRequested)}</Text>
+              <Text style={styles.body}>Spaces requested: {spacesLabel(event.spacesRequested)}</Text>
             ) : (
               <>
-                <Text style={styles.label}>Space requested</Text>
+                <Text style={styles.label}>Spaces requested</Text>
                 {availableSpaces.length === 0 ? (
                   <Text style={styles.muted}>No spaces are available for this event.</Text>
                 ) : null}
-                {availableSpaces.map((option) => (
-                  <Pressable
-                    key={option.id}
-                    accessibilityRole="radio"
-                    accessibilityState={{ selected: selectedSpace === option.id }}
-                    onPress={() => setSpaceRequested(option.id)}
-                    style={[styles.choice, selectedSpace === option.id && styles.choiceSelected, pointer]}
-                  >
-                    <Text style={styles.choiceLabel}>{option.label}</Text>
-                  </Pressable>
-                ))}
+                {availableSpaces.map((option) => {
+                  const count = chosenSpaces.filter((id) => id === option.id).length;
+                  return (
+                    <View key={option.id} style={[styles.quantityRow, count > 0 && styles.choiceSelected]}>
+                      <Text style={styles.choiceLabel}>{option.label}</Text>
+                      <View style={styles.quantityControls}>
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`Remove one ${option.label}`}
+                          disabled={count === 0}
+                          onPress={() => setSpaceCount(option.id, count - 1)}
+                          style={[styles.quantityButton, count === 0 && styles.disabled, pointer]}
+                        >
+                          <Text style={styles.quantityButtonLabel}>−</Text>
+                        </Pressable>
+                        <Text style={styles.quantityCount}>{count}</Text>
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`Add one ${option.label}`}
+                          disabled={count >= MAX_SPACES}
+                          onPress={() => setSpaceCount(option.id, count + 1)}
+                          style={[styles.quantityButton, count >= MAX_SPACES && styles.disabled, pointer]}
+                        >
+                          <Text style={styles.quantityButtonLabel}>+</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  );
+                })}
               </>
             )}
-            {event.registered && event.paid ? (
+            {event.registered && event.paid && !refundable ? <Text style={styles.paidLabel}>Paid.</Text> : null}
+            {refundable && !refundClosed ? (
               <Text style={styles.paidLabel}>Paid. Canceling refunds this booth fee through Stripe.</Text>
+            ) : null}
+            {refundClosed ? (
+              <Text style={styles.muted}>This event has started, so the booth fee cannot be refunded.</Text>
             ) : null}
             {event.registered && !event.paid ? (
               <View style={styles.unpaidBanner}>
@@ -421,33 +469,37 @@ function EventDetailView({
                 </Text>
               </View>
             ) : null}
+            {refundClosed ? null : (
             <Pressable
               accessibilityRole="button"
-              disabled={busy || full || (!event.registered && !selectedSpace)}
+              disabled={busy || full || (!event.registered && chosenSpaces.length === 0)}
               onPress={() => {
                 void changeRegistration();
               }}
               style={({ pressed }) => [
                 styles.primaryButton,
-                (busy || full || (!event.registered && !selectedSpace)) && styles.disabled,
+                (busy || full || (!event.registered && chosenSpaces.length === 0)) && styles.disabled,
                 pressed && styles.pressed,
                 pointer,
               ]}
             >
               <Text style={styles.primaryLabel}>
                 {busy
-                  ? event.registered && event.paid
+                  ? refundable
                     ? 'Refunding…'
                     : 'Saving…'
                   : full
                     ? 'Event is full'
                     : event.registered
-                      ? event.paid
+                      ? refundable
                         ? 'Cancel and refund'
-                        : 'Cancel registration'
+                        : event.paid
+                          ? 'Cancel'
+                          : 'Cancel registration'
                       : 'Register'}
               </Text>
             </Pressable>
+            )}
             {event.registered && !event.paid ? (
               <Pressable
                 accessibilityRole="button"
@@ -485,13 +537,24 @@ function EventDetailView({
                     <Text style={styles.personName}>{registration.name}</Text>
                   )}
                   {registration.email ? <Text style={styles.muted}>{registration.email}</Text> : null}
-                  {admin ? <Text style={styles.meta}>Space requested: {spaceLabel(registration.spaceRequested)}</Text> : null}
+                  {admin ? (
+                    <Text style={styles.meta}>Spaces requested: {spacesLabel(registration.spacesRequested)}</Text>
+                  ) : null}
                   {registration.paid === true ? (
                     <Text style={styles.paidLabel}>
                       Paid{registration.amountCents != null ? ` ${formatFee(registration.amountCents)}` : ''}
                     </Text>
                   ) : null}
                   {registration.paid === false ? <Text style={styles.unpaidLabel}>Payment due</Text> : null}
+                  {admin ? (
+                    <RegistrationOverride
+                      token={token}
+                      eventId={event.id}
+                      offered={event.spacesAvailable}
+                      registration={registration}
+                      onChanged={setDetail}
+                    />
+                  ) : null}
                 </View>
               ))
             )}
@@ -889,6 +952,213 @@ function splitDateTime(value: string | null | undefined): { date: string; time: 
   };
 }
 
+function RegistrationOverride({
+  token,
+  eventId,
+  offered,
+  registration,
+  onChanged,
+}: {
+  token: string;
+  eventId: string;
+  offered: RegistrationSummary['spacesRequested'];
+  registration: RegistrationSummary;
+  onChanged: (detail: EventDetail) => void;
+}) {
+  const [mode, setMode] = useState<'view' | 'edit' | 'cancel'>('view');
+  const [spaces, setSpaces] = useState<RegistrationSummary['spacesRequested']>(registration.spacesRequested);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const choices = SPACE_OPTIONS.filter((option) => offered.includes(option.id));
+
+  function setCount(id: RegistrationSummary['spacesRequested'][number], count: number) {
+    const next = Math.max(0, Math.min(MAX_SPACES, count));
+    setSpaces((current) => [...current.filter((item) => item !== id), ...Array.from({ length: next }, () => id)]);
+  }
+
+  async function saveSpaces() {
+    if (spaces.length === 0) {
+      setError('Choose at least one space.');
+      return;
+    }
+    if (spaces.length > MAX_SPACES) {
+      setError('Request 20 spaces or fewer.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      onChanged(await updateRegistrationSpaces(token, eventId, registration.id, spaces));
+      setMode('view');
+    } catch (reason) {
+      setError(messageFrom(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmCancel() {
+    setBusy(true);
+    setError(null);
+    try {
+      onChanged(await cancelRegistration(token, eventId, registration.id));
+    } catch (reason) {
+      setError(messageFrom(reason));
+      setBusy(false);
+    }
+  }
+
+  async function recordPayment() {
+    setBusy(true);
+    setError(null);
+    try {
+      onChanged(await markRegistrationPaid(token, eventId, registration.id));
+    } catch (reason) {
+      setError(messageFrom(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const cancelWarning = registration.refundable
+    ? 'Canceling refunds the Stripe booth fee, including after the event has started.'
+    : 'Remove this registration?';
+
+  return (
+    <View style={styles.override}>
+      {mode === 'view' ? (
+        <View style={styles.adminActions}>
+          <Pressable
+            accessibilityRole="button"
+            disabled={busy}
+            onPress={() => {
+              setSpaces(registration.spacesRequested);
+              setError(null);
+              setMode('edit');
+            }}
+            style={pointer}
+          >
+            <Text style={styles.back}>Modify</Text>
+          </Pressable>
+          {registration.paid === false ? (
+            <Pressable
+              accessibilityRole="button"
+              disabled={busy}
+              onPress={() => {
+                void recordPayment();
+              }}
+              style={pointer}
+            >
+              <Text style={styles.back}>{busy ? 'Saving…' : 'Mark paid'}</Text>
+            </Pressable>
+          ) : null}
+          <Pressable
+            accessibilityRole="button"
+            disabled={busy}
+            onPress={() => {
+              setError(null);
+              setMode('cancel');
+            }}
+            style={pointer}
+          >
+            <Text style={styles.back}>{registration.refundable ? 'Cancel and refund' : 'Cancel'}</Text>
+          </Pressable>
+        </View>
+      ) : null}
+      {mode === 'edit' ? (
+        <View style={styles.overridePanel}>
+          {choices.map((option) => {
+            const count = spaces.filter((id) => id === option.id).length;
+            return (
+              <View key={option.id} style={styles.quantityRow}>
+                <Text style={styles.choiceLabel}>{option.label}</Text>
+                <View style={styles.quantityControls}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Fewer ${option.label}`}
+                    disabled={count === 0 || busy}
+                    onPress={() => setCount(option.id, count - 1)}
+                    style={[styles.quantityButton, (count === 0 || busy) && styles.disabled, pointer]}
+                  >
+                    <Text style={styles.quantityButtonLabel}>−</Text>
+                  </Pressable>
+                  <Text style={styles.quantityCount}>{count}</Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`More ${option.label}`}
+                    disabled={count >= MAX_SPACES || busy}
+                    onPress={() => setCount(option.id, count + 1)}
+                    style={[styles.quantityButton, (count >= MAX_SPACES || busy) && styles.disabled, pointer]}
+                  >
+                    <Text style={styles.quantityButtonLabel}>+</Text>
+                  </Pressable>
+                </View>
+              </View>
+            );
+          })}
+          <View style={styles.adminActions}>
+            <Pressable
+              accessibilityRole="button"
+              disabled={busy}
+              onPress={() => {
+                void saveSpaces();
+              }}
+              style={pointer}
+            >
+              <Text style={styles.back}>{busy ? 'Saving…' : 'Save spaces'}</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              disabled={busy}
+              onPress={() => {
+                setError(null);
+                setMode('view');
+              }}
+              style={pointer}
+            >
+              <Text style={styles.back}>Keep spaces</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
+      {mode === 'cancel' ? (
+        <View style={styles.overridePanel}>
+          <Text style={styles.warning}>{cancelWarning}</Text>
+          <View style={styles.adminActions}>
+            <Pressable
+              accessibilityRole="button"
+              disabled={busy}
+              onPress={() => {
+                void confirmCancel();
+              }}
+              style={pointer}
+            >
+              <Text style={styles.back}>{busy ? 'Canceling…' : 'Confirm cancel'}</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              disabled={busy}
+              onPress={() => {
+                setError(null);
+                setMode('view');
+              }}
+              style={pointer}
+            >
+              <Text style={styles.back}>Keep registration</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+    </View>
+  );
+}
+
+function eventHasStarted(startsAt: string): boolean {
+  const start = Date.parse(startsAt);
+  return Number.isFinite(start) && start <= Date.now();
+}
+
 function combineDateTime(date: string, time: string): string | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date.trim()) || !/^\d{2}:\d{2}$/.test(time.trim())) {
     return null;
@@ -1064,6 +1334,19 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  override: {
+    gap: 8,
+    marginTop: 8,
+  },
+  overridePanel: {
+    gap: 8,
+  },
+  adminActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 16,
+  },
   error: {
     color: colors.danger,
     backgroundColor: colors.dangerBackground,
@@ -1092,6 +1375,46 @@ const styles = StyleSheet.create({
   choiceLabel: {
     color: colors.ink,
     fontSize: 16,
+  },
+  quantityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.card,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  quantityControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  quantityButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.card,
+  },
+  quantityButtonLabel: {
+    color: colors.ink,
+    fontSize: 20,
+    lineHeight: 24,
+    fontWeight: '600',
+  },
+  quantityCount: {
+    minWidth: 24,
+    textAlign: 'center',
+    color: colors.ink,
+    fontSize: 16,
+    fontWeight: '600',
   },
   input: {
     backgroundColor: colors.card,

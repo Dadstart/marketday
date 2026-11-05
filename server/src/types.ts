@@ -59,8 +59,9 @@ export type EventRecord = EventInput & {
   registrationCount: number;
   registered: boolean;
   paid: boolean;
+  refundable: boolean;
   feeCents: number | null;
-  spaceRequested: string | null;
+  spacesRequested: SpaceRequest[];
   createdAt: string;
 };
 
@@ -70,8 +71,9 @@ export type RegistrationRecord = {
   name: string;
   email: string | null;
   paid: boolean | null;
+  refundable: boolean;
   amountCents: number | null;
-  spaceRequested: string | null;
+  spacesRequested: SpaceRequest[];
   createdAt: string;
 };
 
@@ -92,5 +94,6 @@ export type AccountDetail = AccountSummary & {
   offering: string | null;
   productsAndServices: string | null;
   facebookName: string | null;
+  adminNotes: string | null;
   createdAt: string;
 };

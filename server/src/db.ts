@@ -42,6 +42,33 @@ const eventColumns =
 
 const spaceOrder: SpaceRequest[] = ['grass-generator', 'grass', 'food-truck', 'pavilion'];
 
+function mergeSpaceLists(left: SpaceRequest[], right: SpaceRequest[]): SpaceRequest[] {
+  const merged: SpaceRequest[] = [];
+  for (const space of spaceOrder) {
+    const count = Math.max(
+      left.filter((item) => item === space).length,
+      right.filter((item) => item === space).length,
+    );
+    for (let index = 0; index < count; index += 1) {
+      merged.push(space);
+    }
+  }
+  return merged;
+}
+
+function asSpaceList(value: unknown): SpaceRequest[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const spaces: SpaceRequest[] = [];
+  for (const item of value) {
+    if (typeof item === 'string' && spaceOrder.includes(item as SpaceRequest)) {
+      spaces.push(item as SpaceRequest);
+    }
+  }
+  return spaces;
+}
+
 type EventRow = {
   id: string;
   title: string;
@@ -60,7 +87,8 @@ type RegistrationRow = {
   user_id: string;
   created_at: string;
   paid_at: string | null;
-  space_requested: string | null;
+  stripe_checkout_session_id: string | null;
+  spaces_requested: string[] | null;
 };
 
 type RegistrantRow = {
@@ -69,7 +97,8 @@ type RegistrantRow = {
   created_at: string;
   paid_at: string | null;
   amount_cents: number | null;
-  space_requested: string | null;
+  stripe_checkout_session_id: string | null;
+  spaces_requested: string[] | null;
   users: { name: string; email: string } | { name: string; email: string }[] | null;
 };
 
@@ -89,7 +118,7 @@ const supabase: SupabaseClient = createClient(supabaseUrl, supabaseServiceRoleKe
 });
 
 const accountLinkColumns =
-  'id, email, created_at, profile_completed_at, picture, venmo, contact_person, business_name, phone, crosswinds_resident, offering, products_and_services, facebook_name';
+  'id, email, created_at, profile_completed_at, picture, venmo, contact_person, business_name, phone, crosswinds_resident, offering, products_and_services, facebook_name, admin_notes';
 
 type AccountLink = {
   id: string;
@@ -105,6 +134,7 @@ type AccountLink = {
   offering: string | null;
   products_and_services: string | null;
   facebook_name: string | null;
+  admin_notes: string | null;
 };
 
 export async function upsertUser(identity: Identity): Promise<CurrentUser> {
@@ -277,6 +307,7 @@ function missingProfile(survivor: AccountLink, duplicate: AccountLink): Partial<
     'offering',
     'products_and_services',
     'facebook_name',
+    'admin_notes',
     'profile_completed_at',
   ] as const;
   for (const field of fields) {
@@ -293,11 +324,11 @@ type RegistrationLink = {
   paid_at: string | null;
   amount_cents: number | null;
   stripe_checkout_session_id: string | null;
-  space_requested: string | null;
+  spaces_requested: string[] | null;
 };
 
 async function moveRegistrations(survivorId: string, duplicateId: string): Promise<void> {
-  const columns = 'id, event_id, paid_at, amount_cents, stripe_checkout_session_id, space_requested';
+  const columns = 'id, event_id, paid_at, amount_cents, stripe_checkout_session_id, spaces_requested';
   const [survivorResult, duplicateResult] = await Promise.all([
     supabase.from('registrations').select(columns).eq('user_id', survivorId),
     supabase.from('registrations').select(columns).eq('user_id', duplicateId),
@@ -324,8 +355,11 @@ async function moveRegistrations(survivorId: string, duplicateId: string): Promi
     }
 
     const patch: Partial<RegistrationLink> = {};
-    if (survivorRow.space_requested == null && duplicateRow.space_requested != null) {
-      patch.space_requested = duplicateRow.space_requested;
+    const survivorSpaces = asSpaceList(survivorRow.spaces_requested);
+    const duplicateSpaces = asSpaceList(duplicateRow.spaces_requested);
+    const merged = mergeSpaceLists(survivorSpaces, duplicateSpaces);
+    if (merged.join('\0') !== survivorSpaces.join('\0')) {
+      patch.spaces_requested = merged;
     }
     if (survivorRow.paid_at == null && duplicateRow.paid_at != null) {
       patch.paid_at = duplicateRow.paid_at;
@@ -361,18 +395,7 @@ export async function getUserById(userId: string): Promise<CurrentUser | null> {
 export async function saveVendorProfile(userId: string, input: VendorProfileInput): Promise<CurrentUser> {
   const { data, error } = await supabase
     .from('users')
-    .update({
-      venmo: input.venmo,
-      contact_person: input.contactPerson,
-      business_name: input.businessName,
-      phone: input.phone,
-      crosswinds_resident: input.crosswindsResident,
-      offering: input.offering,
-      products_and_services: input.productsAndServices,
-      facebook_name: input.facebookName,
-      profile_completed_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
+    .update(profileUpdate(input))
     .eq('id', userId)
     .select(userColumns)
     .single();
@@ -382,6 +405,38 @@ export async function saveVendorProfile(userId: string, input: VendorProfileInpu
   }
 
   return toCurrentUser(data as UserRow);
+}
+
+export async function saveAdminAccount(
+  userId: string,
+  input: VendorProfileInput,
+  adminNotes: string | null,
+): Promise<void> {
+  const { error } = await supabase
+    .from('users')
+    .update({
+      ...profileUpdate(input),
+      admin_notes: adminNotes,
+    })
+    .eq('id', userId);
+  if (error) {
+    throw databaseFailure(error.message);
+  }
+}
+
+function profileUpdate(input: VendorProfileInput) {
+  return {
+    venmo: input.venmo,
+    contact_person: input.contactPerson,
+    business_name: input.businessName,
+    phone: input.phone,
+    crosswinds_resident: input.crosswindsResident,
+    offering: input.offering,
+    products_and_services: input.productsAndServices,
+    facebook_name: input.facebookName,
+    profile_completed_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
 }
 
 const profileColumns =
@@ -418,15 +473,19 @@ export async function listEvents(userId: string): Promise<EventRecord[]> {
   const counts = new Map<string, number>();
   const mine = new Set<string>();
   const paid = new Set<string>();
-  const spaces = new Map<string, string | null>();
+  const refundable = new Set<string>();
+  const spaces = new Map<string, SpaceRequest[]>();
 
   for (const registration of registrations) {
     counts.set(registration.event_id, (counts.get(registration.event_id) ?? 0) + 1);
     if (registration.user_id === userId) {
       mine.add(registration.event_id);
-      spaces.set(registration.event_id, registration.space_requested);
+      spaces.set(registration.event_id, asSpaceList(registration.spaces_requested));
       if (registration.paid_at) {
         paid.add(registration.event_id);
+        if (registration.stripe_checkout_session_id) {
+          refundable.add(registration.event_id);
+        }
       }
     }
   }
@@ -437,8 +496,9 @@ export async function listEvents(userId: string): Promise<EventRecord[]> {
       counts.get(event.id) ?? 0,
       mine.has(event.id),
       paid.has(event.id),
+      refundable.has(event.id),
       boothFee?.cents ?? null,
-      spaces.get(event.id) ?? null,
+      spaces.get(event.id) ?? [],
     ),
   );
 }
@@ -462,7 +522,9 @@ export async function getEvent(
 
   const { data: registrationRows, error: registrationError } = await supabase
     .from('registrations')
-    .select('id, user_id, created_at, paid_at, amount_cents, space_requested, users(name, email)')
+    .select(
+      'id, user_id, created_at, paid_at, amount_cents, stripe_checkout_session_id, spaces_requested, users(name, email)',
+    )
     .eq('event_id', eventId)
     .order('created_at', { ascending: true });
 
@@ -481,8 +543,9 @@ export async function getEvent(
       name: account?.name ?? 'Registered user',
       email: showEmail ? email : null,
       paid: user.admin ? row.paid_at != null : null,
+      refundable: user.admin ? row.paid_at != null && Boolean(row.stripe_checkout_session_id) : false,
       amountCents: user.admin ? row.amount_cents : null,
-      spaceRequested: user.admin ? row.space_requested : null,
+      spacesRequested: user.admin ? asSpaceList(row.spaces_requested) : [],
       createdAt: row.created_at,
     };
   });
@@ -496,8 +559,9 @@ export async function getEvent(
       registrations.length,
       mine != null,
       mine?.paid_at != null,
+      mine?.paid_at != null && Boolean(mine.stripe_checkout_session_id),
       boothFee?.cents ?? null,
-      mine?.space_requested ?? null,
+      asSpaceList(mine?.spaces_requested),
     ),
     registrations,
   };
@@ -524,13 +588,13 @@ export async function createEvent(userId: string, input: EventInput): Promise<Ev
   }
 
   const boothFee = await getBoothFee(userId);
-  return toEventRecord(data as EventRow, 0, false, false, boothFee?.cents ?? null, null);
+  return toEventRecord(data as EventRow, 0, false, false, false, boothFee?.cents ?? null, []);
 }
 
 export async function updateEvent(eventId: string, input: EventInput): Promise<boolean> {
   const { data: registrations, error: registrationError } = await supabase
     .from('registrations')
-    .select('space_requested')
+    .select('spaces_requested')
     .eq('event_id', eventId);
   if (registrationError) {
     throw databaseFailure(registrationError.message);
@@ -541,11 +605,8 @@ export async function updateEvent(eventId: string, input: EventInput): Promise<b
     throw new DatabaseError(400, 'Capacity cannot be lower than the number of people already registered.');
   }
   const offered = new Set<string>(input.spacesAvailable);
-  const requestedSpaceRemoved = rows.some(
-    (row) =>
-      typeof row.space_requested === 'string' &&
-      spaceOrder.includes(row.space_requested as SpaceRequest) &&
-      !offered.has(row.space_requested),
+  const requestedSpaceRemoved = rows.some((row) =>
+    asSpaceList(row.spaces_requested).some((space) => !offered.has(space)),
   );
   if (requestedSpaceRemoved) {
     throw new DatabaseError(400, 'Someone is already registered for a space you removed.');
@@ -574,7 +635,7 @@ export async function updateEvent(eventId: string, input: EventInput): Promise<b
 const accountSummaryColumns =
   'id, name, email, business_name, venmo, contact_person, phone, crosswinds_resident, offering, products_and_services, facebook_name, profile_completed_at';
 const accountDetailColumns =
-  'id, name, email, provider, business_name, venmo, contact_person, phone, crosswinds_resident, offering, products_and_services, facebook_name, profile_completed_at, created_at';
+  'id, name, email, provider, business_name, venmo, contact_person, phone, crosswinds_resident, offering, products_and_services, facebook_name, admin_notes, profile_completed_at, created_at';
 
 type AccountSummaryRow = {
   id: string;
@@ -600,6 +661,7 @@ type AccountDetailRow = AccountSummaryRow & {
   offering: string | null;
   products_and_services: string | null;
   facebook_name: string | null;
+  admin_notes: string | null;
   created_at: string;
 };
 
@@ -630,6 +692,7 @@ export async function getAccount(userId: string): Promise<AccountDetail | null> 
     offering: blankToNull(row.offering),
     productsAndServices: blankToNull(row.products_and_services),
     facebookName: blankToNull(row.facebook_name),
+    adminNotes: blankToNull(row.admin_notes),
     createdAt: row.created_at,
   };
 }
@@ -663,6 +726,114 @@ export async function getBoothFee(userId: string): Promise<BoothFee | null> {
     return null;
   }
   return { cents: feeCents(data.crosswinds_resident), resident: data.crosswinds_resident };
+}
+
+export async function getEventStart(eventId: string): Promise<string | null> {
+  const { data, error } = await supabase.from('events').select('starts_at').eq('id', eventId).maybeSingle();
+  if (error) {
+    throw databaseFailure(error.message);
+  }
+  if (!data) {
+    return null;
+  }
+  return (data.starts_at as string | null) ?? null;
+}
+
+export async function getRegistration(
+  eventId: string,
+  registrationId: string,
+): Promise<{
+  id: string;
+  userId: string;
+  paidAt: string | null;
+  stripeCheckoutSessionId: string | null;
+} | null> {
+  const { data, error } = await supabase
+    .from('registrations')
+    .select('id, user_id, paid_at, stripe_checkout_session_id')
+    .eq('id', registrationId)
+    .eq('event_id', eventId)
+    .maybeSingle();
+
+  if (error) {
+    throw databaseFailure(error.message);
+  }
+  if (!data) {
+    return null;
+  }
+  return {
+    id: data.id as string,
+    userId: data.user_id as string,
+    paidAt: (data.paid_at as string | null) ?? null,
+    stripeCheckoutSessionId: (data.stripe_checkout_session_id as string | null) ?? null,
+  };
+}
+
+export async function updateRegistrationSpaces(
+  eventId: string,
+  registrationId: string,
+  spacesRequested: SpaceRequest[],
+): Promise<void> {
+  const { data: event, error: eventError } = await supabase
+    .from('events')
+    .select('spaces_available')
+    .eq('id', eventId)
+    .maybeSingle();
+  if (eventError) {
+    throw databaseFailure(eventError.message);
+  }
+  if (!event) {
+    throw new DatabaseError(404, 'That event does not exist.');
+  }
+  const offered = new Set(spacesAvailable((event.spaces_available as string[] | null) ?? []));
+  if (spacesRequested.some((space) => !offered.has(space))) {
+    throw new DatabaseError(400, 'One of those spaces is not available for this event.');
+  }
+
+  const { data, error } = await supabase
+    .from('registrations')
+    .update({ spaces_requested: spacesRequested })
+    .eq('id', registrationId)
+    .eq('event_id', eventId)
+    .select('id');
+  if (error) {
+    throw databaseFailure(error.message);
+  }
+  if ((data ?? []).length === 0) {
+    throw new DatabaseError(404, 'That registration does not exist.');
+  }
+}
+
+export async function deleteRegistration(eventId: string, registrationId: string): Promise<void> {
+  const { error } = await supabase.from('registrations').delete().eq('id', registrationId).eq('event_id', eventId);
+  if (error) {
+    throw databaseFailure(error.message);
+  }
+}
+
+export async function markRegistrationPaidByAdmin(
+  eventId: string,
+  registrationId: string,
+  amountCents: number,
+  stripeCheckoutSessionId: string | null,
+): Promise<void> {
+  const { data, error } = await supabase
+    .from('registrations')
+    .update({
+      paid_at: new Date().toISOString(),
+      amount_cents: amountCents,
+      stripe_checkout_session_id: stripeCheckoutSessionId,
+    })
+    .eq('id', registrationId)
+    .eq('event_id', eventId)
+    .is('paid_at', null)
+    .select('id');
+  if (error) {
+    throw databaseFailure(error.message);
+  }
+  if ((data ?? []).length === 0) {
+    throw new DatabaseError(409, 'That registration is already paid.');
+  }
 }
 
 export async function getOwnedRegistration(eventId: string, userId: string): Promise<OwnedRegistration | null> {
@@ -720,12 +891,12 @@ export async function markRegistrationPaid(
 export async function registerForEvent(
   eventId: string,
   userId: string,
-  spaceRequested: SpaceRequest,
+  spacesRequested: SpaceRequest[],
 ): Promise<void> {
   const { error } = await supabase.rpc('register_for_event', {
     p_event_id: eventId,
     p_user_id: userId,
-    p_space_requested: spaceRequested,
+    p_spaces_requested: spacesRequested,
   });
 
   if (!error) {
@@ -739,10 +910,13 @@ export async function registerForEvent(
     throw new DatabaseError(409, 'This event is full.');
   }
   if (error.message.includes('invalid_space')) {
-    throw new DatabaseError(400, 'Choose the space you are requesting.');
+    throw new DatabaseError(400, 'Choose at least one space.');
   }
   if (error.message.includes('space_unavailable')) {
-    throw new DatabaseError(400, 'That space is not available for this event.');
+    throw new DatabaseError(400, 'One of those spaces is not available for this event.');
+  }
+  if (error.message.includes('too_many_spaces')) {
+    throw new DatabaseError(400, 'Request 20 spaces or fewer.');
   }
   throw databaseFailure(error.message);
 }
@@ -791,7 +965,7 @@ async function selectEvents(): Promise<EventRow[]> {
 async function selectRegistrations(): Promise<RegistrationRow[]> {
   const { data, error } = await supabase
     .from('registrations')
-    .select('id, event_id, user_id, created_at, paid_at, space_requested');
+    .select('id, event_id, user_id, created_at, paid_at, stripe_checkout_session_id, spaces_requested');
   if (error) {
     throw databaseFailure(error.message);
   }
@@ -851,8 +1025,9 @@ function toEventRecord(
   registrationCount: number,
   registered: boolean,
   paid: boolean,
+  refundable: boolean,
   feeCents: number | null,
-  spaceRequested: string | null,
+  spacesRequested: SpaceRequest[],
 ): EventRecord {
   return {
     id: row.id,
@@ -865,8 +1040,9 @@ function toEventRecord(
     registrationCount,
     registered,
     paid: registered && paid,
+    refundable: registered && paid && refundable,
     feeCents,
-    spaceRequested: registered ? spaceRequested : null,
+    spacesRequested: registered ? spacesRequested : [],
     spacesAvailable: spacesAvailable(row.spaces_available),
     createdAt: row.created_at,
   };

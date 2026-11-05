@@ -13,6 +13,7 @@ import {
 } from './config';
 import { sessionFromAuthResult } from './sessionFromAuth';
 import type { ProviderCredential } from './types';
+import { startWebRedirect } from './webRedirect';
 
 const UNCONFIGURED_CLIENT_ID = 'unconfigured';
 
@@ -33,6 +34,18 @@ export function useGoogleSignIn() {
     const clientId = googleClientIdForPlatform();
     if (!configured || !clientId || !request) {
       throw new Error('Google sign-in is not configured.');
+    }
+
+    if (Platform.OS === 'web') {
+      startWebRedirect({
+        provider: 'google',
+        request,
+        clientId,
+        redirectUri,
+      });
+      return new Promise<ProviderCredential | null>(() => {
+        // The browser leaves this page for Google and comes back at the redirect URI.
+      });
     }
 
     const result = await promptAsync();

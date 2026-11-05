@@ -22,8 +22,9 @@ export type EventSummary = {
   registrationCount: number;
   registered: boolean;
   paid: boolean;
+  refundable: boolean;
   feeCents: number | null;
-  spaceRequested: string | null;
+  spacesRequested: ('grass-generator' | 'grass' | 'food-truck' | 'pavilion')[];
   spacesAvailable: ('grass-generator' | 'grass' | 'food-truck' | 'pavilion')[];
   createdAt: string;
 };
@@ -34,8 +35,9 @@ export type RegistrationSummary = {
   name: string;
   email: string | null;
   paid: boolean | null;
+  refundable: boolean;
   amountCents: number | null;
-  spaceRequested: string | null;
+  spacesRequested: ('grass-generator' | 'grass' | 'food-truck' | 'pavilion')[];
   createdAt: string;
 };
 
@@ -56,6 +58,7 @@ export type AccountDetail = AccountSummary & {
   offering: string | null;
   productsAndServices: string | null;
   facebookName: string | null;
+  adminNotes: string | null;
   createdAt: string;
 };
 
@@ -139,6 +142,17 @@ export function fetchAccount(token: string, userId: string): Promise<{ user: Acc
   return request(`/admin/users/${userId}`, token);
 }
 
+export function updateAccount(
+  token: string,
+  userId: string,
+  profile: VendorProfileInput & { adminNotes: string | null },
+): Promise<{ user: AccountDetail }> {
+  return request(`/admin/users/${userId}`, token, {
+    method: 'PUT',
+    body: JSON.stringify(profile),
+  });
+}
+
 export function fetchEvents(token: string): Promise<{ events: EventSummary[] }> {
   return request('/events', token);
 }
@@ -168,16 +182,36 @@ export function createEvent(token: string, draft: EventDraft): Promise<{ event: 
 export function registerForEvent(
   token: string,
   eventId: string,
-  spaceRequested: 'grass-generator' | 'grass' | 'food-truck' | 'pavilion',
+  spacesRequested: ('grass-generator' | 'grass' | 'food-truck' | 'pavilion')[],
 ): Promise<EventDetail> {
   return request(`/events/${eventId}/registrations`, token, {
     method: 'POST',
-    body: JSON.stringify({ spaceRequested }),
+    body: JSON.stringify({ spacesRequested }),
   });
 }
 
 export function unregisterFromEvent(token: string, eventId: string): Promise<EventDetail> {
   return request(`/events/${eventId}/registrations`, token, { method: 'DELETE' });
+}
+
+export function updateRegistrationSpaces(
+  token: string,
+  eventId: string,
+  registrationId: string,
+  spacesRequested: RegistrationSummary['spacesRequested'],
+): Promise<EventDetail> {
+  return request(`/events/${eventId}/registrations/${registrationId}`, token, {
+    method: 'PUT',
+    body: JSON.stringify({ spacesRequested }),
+  });
+}
+
+export function cancelRegistration(token: string, eventId: string, registrationId: string): Promise<EventDetail> {
+  return request(`/events/${eventId}/registrations/${registrationId}`, token, { method: 'DELETE' });
+}
+
+export function markRegistrationPaid(token: string, eventId: string, registrationId: string): Promise<EventDetail> {
+  return request(`/events/${eventId}/registrations/${registrationId}/paid`, token, { method: 'POST' });
 }
 
 export function startEventPayment(
@@ -219,7 +253,7 @@ async function request<T>(path: string, token: string | null, init?: RequestInit
   try {
     response = await fetch(`${API_URL}${path}`, { ...init, headers });
   } catch {
-    throw new ApiError('The Market Day server is not running.', 0);
+    throw new ApiError('The Community Day server is not running.', 0);
   }
 
   if (response.status === 204) {
