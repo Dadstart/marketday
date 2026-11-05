@@ -9,8 +9,11 @@ import {
   deleteRegistration,
   getAccount,
   getBoothFee,
+  emailAudienceCounts,
   getEvent,
   getEventMap,
+  isEmailAudience,
+  listEmailRecipients,
   getEventStart,
   getOwnedRegistration,
   getUserById,
@@ -32,7 +35,7 @@ import {
   updateRegistrationSpaces,
   upsertUser,
 } from './db.js';
-import { sanitizeDescription } from '../../client/src/description.js';
+import { emailPlainText, sanitizeDescription, sanitizeEmailHtml } from '../../client/src/description.js';
 import { parseAdminNotes, parseAvailableSpaces, parseRequestedSpaces, parseVendorProfile, ProfileError } from './profile.js';
 import { feeCents } from './fees.js';
 import {
@@ -43,6 +46,7 @@ import {
   PaymentError,
   refundRegistrationPayment,
 } from './stripe.js';
+import { sendVendorEmails, SesError } from './ses.js';
 import type { CurrentUser, EventInput } from './types.js';
 
 type AppVariables = {
@@ -328,6 +332,50 @@ app.post('/events/:id/registrations/:registrationId/paid', async (c) => {
   return c.json(await eventDetail(c, eventId));
 });
 
+app.get('/events/:id/email-audiences', async (c) => {
+  requireRegistrationAdmin(c.get('user'));
+  const counts = await emailAudienceCounts(c.req.param('id'));
+  if (!counts) {
+    throw new HttpError(404, 'That event does not exist.');
+  }
+  return c.json(counts);
+});
+
+app.post('/events/:id/email', async (c) => {
+  const admin = c.get('user');
+  requireRegistrationAdmin(admin);
+  const eventId = c.req.param('id');
+  const body = await readJson(c);
+  const audience = typeof body.audience === 'string' ? body.audience : '';
+  if (!isEmailAudience(audience)) {
+    throw new HttpError(400, 'Choose who should receive this email.');
+  }
+  const subject = boundedText(body.subject, 'A subject is required.', 200).replace(/\s+/g, ' ');
+  const message = boundedText(body.text, 'A message is required.', 8000);
+  const htmlBody = sanitizeEmailHtml(message);
+  const text = emailPlainText(htmlBody) || ' ';
+  if (!htmlBody) {
+    throw new HttpError(400, 'A message is required.');
+  }
+  const images = parseEmailImages(body.images, htmlBody);
+  if (!(await emailAudienceCounts(eventId))) {
+    throw new HttpError(404, 'That event does not exist.');
+  }
+  const recipients = await listEmailRecipients(audience, eventId);
+  if (recipients.length === 0) {
+    throw new HttpError(400, 'No vendors match that choice.');
+  }
+  const result = await sendVendorEmails({
+    replyTo: admin.email,
+    subject,
+    html: `<!DOCTYPE html><html><body>${htmlBody}</body></html>`,
+    text,
+    images,
+    recipients,
+  });
+  return c.json(result);
+});
+
 app.get('/events/:id/map', async (c) => {
   requireRegistrationAdmin(c.get('user'));
   const map = await getEventMap(c.req.param('id'));
@@ -462,7 +510,8 @@ app.onError((error, c) => {
     error instanceof HttpError ||
     error instanceof DatabaseError ||
     error instanceof ProfileError ||
-    error instanceof PaymentError
+    error instanceof PaymentError ||
+    error instanceof SesError
   ) {
     return c.json({ error: error.message }, error.status as 400);
   }
@@ -560,6 +609,64 @@ function parseEventInput(body: Record<string, unknown>): EventInput {
     capacity: optionalCapacity(body.capacity),
     spacesAvailable: parseAvailableSpaces(body.spacesAvailable),
   };
+}
+
+const EMAIL_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+const EMAIL_IMAGE_EXTENSIONS: Record<string, string> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+};
+
+function parseEmailImages(value: unknown, html: string) {
+  if (value == null) {
+    value = [];
+  }
+  if (!Array.isArray(value)) {
+    throw new HttpError(400, 'Images must be a list.');
+  }
+  if (value.length > 6) {
+    throw new HttpError(400, 'An email can include up to 6 images.');
+  }
+  const referenced = new Set([...html.matchAll(/src="cid:([^"]+)"/g)].map((match) => match[1] ?? ''));
+  const images: { id: string; contentType: string; fileName: string; bytes: Uint8Array }[] = [];
+  let total = 0;
+  for (const item of value) {
+    if (!item || typeof item !== 'object') {
+      throw new HttpError(400, 'An image could not be read.');
+    }
+    const record = item as { id?: unknown; contentType?: unknown; data?: unknown };
+    const id = typeof record.id === 'string' ? record.id : '';
+    const contentType = typeof record.contentType === 'string' ? record.contentType : '';
+    const data = typeof record.data === 'string' ? record.data : '';
+    if (!/^img\d+$/.test(id) || !EMAIL_IMAGE_TYPES.has(contentType) || !/^[A-Za-z0-9+/]+={0,2}$/.test(data)) {
+      throw new HttpError(400, 'An image could not be read.');
+    }
+    if (!referenced.has(id)) {
+      continue;
+    }
+    const bytes = Buffer.from(data, 'base64');
+    if (bytes.length === 0 || bytes.length > 1_500_000) {
+      throw new HttpError(400, 'Each image must be 1.5 MB or smaller.');
+    }
+    total += bytes.length;
+    if (total > 4_000_000) {
+      throw new HttpError(400, 'The images in this email are too large.');
+    }
+    images.push({
+      id,
+      contentType,
+      fileName: `${id}.${EMAIL_IMAGE_EXTENSIONS[contentType]}`,
+      bytes,
+    });
+  }
+  for (const id of referenced) {
+    if (!images.some((image) => image.id === id)) {
+      throw new HttpError(400, 'An image in the message could not be attached.');
+    }
+  }
+  return images;
 }
 
 function boundedText(value: unknown, requiredMessage: string, maxLength: number): string {

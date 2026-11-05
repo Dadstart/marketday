@@ -260,6 +260,38 @@ export function assignEventSpace(
   });
 }
 
+export type EmailImage = {
+  id: string;
+  contentType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
+  data: string;
+};
+
+export type EmailAudience = 'vendors' | 'registered' | 'unpaid';
+
+export type EmailAudienceCounts = {
+  vendors: number;
+  registered: number;
+  unpaid: number;
+};
+
+export function fetchEmailAudiences(token: string, eventId: string): Promise<EmailAudienceCounts> {
+  return request(`/events/${eventId}/email-audiences`, token);
+}
+
+export function sendEventEmail(
+  token: string,
+  eventId: string,
+  audience: EmailAudience,
+  subject: string,
+  text: string,
+  images: EmailImage[],
+): Promise<{ sent: number; failed: { email: string; error: string }[] }> {
+  return request(`/events/${eventId}/email`, token, {
+    method: 'POST',
+    body: JSON.stringify({ audience, subject, text, images }),
+  });
+}
+
 export function startEventPayment(
   token: string,
   eventId: string,

@@ -17,11 +17,16 @@ import {
   confirmCheckout,
   createEvent,
   deleteEvent,
+  fetchEmailAudiences,
   fetchEvent,
   fetchEvents,
   markRegistrationPaid,
   registerForEvent,
+  sendEventEmail,
   startEventPayment,
+  type EmailAudience,
+  type EmailAudienceCounts,
+  type EmailImage,
   unregisterFromEvent,
   updateEvent,
   updateRegistrationSpaces,
@@ -35,6 +40,7 @@ import { Logo } from '../Logo';
 import { AccountDetailView, AccountList } from './UsersScreen';
 import { colors, pointer, serif } from '../theme';
 import { DateTimeInput } from './DateTimeInput';
+import { EmailMessageEditor } from './EmailMessageEditor';
 import { FormattedText } from './FormattedText';
 import { MapScreen } from './MapScreen';
 
@@ -418,6 +424,7 @@ function EventDetailView({
                 </Pressable>
               </View>
             ) : null}
+            {admin ? <EmailVendors token={token} eventId={event.id} /> : null}
             <Text style={styles.body}>{formatWhen(event.startsAt)}</Text>
             {event.endsAt ? <Text style={styles.muted}>Until {formatWhen(event.endsAt)}</Text> : null}
             {event.location ? <Text style={styles.body}>{event.location}</Text> : null}
@@ -868,6 +875,164 @@ function FormatButton({
     >
       <Text style={[styles.formatLabel, textStyle]}>{label}</Text>
     </Pressable>
+  );
+}
+
+const EMAIL_AUDIENCES: { id: EmailAudience; label: string }[] = [
+  { id: 'vendors', label: 'All vendors' },
+  { id: 'registered', label: 'Signed up for this event' },
+  { id: 'unpaid', label: 'Signed up and not paid' },
+];
+
+function EmailVendors({ token, eventId }: { token: string; eventId: string }) {
+  const [open, setOpen] = useState(false);
+  const [audience, setAudience] = useState<EmailAudience>('registered');
+  const [subject, setSubject] = useState('');
+  const [message, setMessage] = useState('');
+  const [images, setImages] = useState<EmailImage[]>([]);
+  const [counts, setCounts] = useState<EmailAudienceCounts | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    let active = true;
+    fetchEmailAudiences(token, eventId)
+      .then((next) => {
+        if (active) {
+          setCounts(next);
+        }
+      })
+      .catch((reason: unknown) => {
+        if (active) {
+          setError(messageFrom(reason));
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [eventId, open, token]);
+
+  const count = counts?.[audience] ?? null;
+
+  async function send() {
+    setBusy(true);
+    setError(null);
+    setResult(null);
+    try {
+      const sent = await sendEventEmail(
+        token,
+        eventId,
+        audience,
+        subject.trim(),
+        message.trim(),
+        images.filter((image) => message.includes(`cid:${image.id}`)),
+      );
+      const failed = sent.failed.length === 0 ? '' : ` ${sent.failed.length} could not be sent.`;
+      setResult(
+        sent.sent === 1 ? `Sent to 1 vendor.${failed}` : `Sent to ${sent.sent} vendors.${failed}`,
+      );
+      if (sent.failed.length > 0) {
+        setError(sent.failed.map((item) => `${item.email}: ${item.error}`).join('\n'));
+      }
+      setConfirming(false);
+      setSubject('');
+      setMessage('');
+      setImages([]);
+    } catch (reason) {
+      setError(messageFrom(reason));
+      setConfirming(false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <View style={styles.emailBox}>
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => {
+          setOpen((shown) => !shown);
+          setConfirming(false);
+        }}
+        style={pointer}
+      >
+        <Text style={styles.back}>{open ? 'Close email' : 'Email vendors'}</Text>
+      </Pressable>
+      {open ? (
+        <View style={styles.emailForm}>
+          {EMAIL_AUDIENCES.map((option) => {
+            const selected = audience === option.id;
+            const optionCount = counts?.[option.id];
+            return (
+              <Pressable
+                key={option.id}
+                accessibilityRole="button"
+                accessibilityState={{ selected }}
+                onPress={() => {
+                  setAudience(option.id);
+                  setConfirming(false);
+                }}
+                style={[styles.choice, selected && styles.choiceSelected, pointer]}
+              >
+                <Text style={styles.choiceLabel}>
+                  {option.label}
+                  {optionCount != null ? ` (${optionCount})` : ''}
+                </Text>
+              </Pressable>
+            );
+          })}
+          <Field label="Subject" value={subject} onChangeText={(value) => {
+            setSubject(value);
+            setConfirming(false);
+          }} />
+          <EmailMessageEditor
+            value={message}
+            images={images}
+            onChange={(value) => {
+              setMessage(value);
+              setConfirming(false);
+            }}
+            onImagesChange={(next) => {
+              setImages(next);
+              setConfirming(false);
+            }}
+            onError={setError}
+          />
+          {count === 0 ? <Text style={styles.muted}>No vendors match that choice.</Text> : null}
+          {error ? <ErrorText message={error} /> : null}
+          {result ? <Text style={styles.paidLabel}>{result}</Text> : null}
+          {confirming && count != null && count > 0 ? (
+            <Text style={styles.warning}>
+              Send this email to {count} {count === 1 ? 'vendor' : 'vendors'}?
+            </Text>
+          ) : null}
+          <Pressable
+            accessibilityRole="button"
+            disabled={busy || count === 0 || !subject.trim() || !message.trim()}
+            onPress={() => {
+              if (!confirming) {
+                setConfirming(true);
+                return;
+              }
+              void send();
+            }}
+            style={({ pressed }) => [
+              styles.primaryButton,
+              (busy || count === 0 || !subject.trim() || !message.trim()) && styles.disabled,
+              pressed && styles.pressed,
+              pointer,
+            ]}
+          >
+            <Text style={styles.primaryLabel}>{busy ? 'Sending…' : confirming ? 'Send email' : 'Review'}</Text>
+          </Pressable>
+        </View>
+      ) : null}
+    </View>
   );
 }
 
@@ -1359,6 +1524,12 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     alignItems: 'center',
     gap: 16,
+  },
+  emailBox: {
+    gap: 12,
+  },
+  emailForm: {
+    gap: 10,
   },
   error: {
     color: colors.danger,
