@@ -8,8 +8,10 @@ import type {
   AccountSummary,
   CurrentUser,
   EventInput,
+  EventMap,
   EventRecord,
   Identity,
+  MapArea,
   ProviderName,
   RegistrationRecord,
   SpaceRequest,
@@ -803,6 +805,185 @@ export async function updateRegistrationSpaces(
     throw new DatabaseError(404, 'That registration does not exist.');
   }
 }
+
+const spotLimits: Record<MapArea, number> = {
+  pavilion: 13,
+  grass: 28,
+  'food-truck': 2,
+};
+
+export function isMapArea(value: string): value is MapArea {
+  return value === 'pavilion' || value === 'grass' || value === 'food-truck';
+}
+
+export async function getEventMap(eventId: string): Promise<EventMap | null> {
+  const event = await readEventTitle(eventId);
+  if (!event) {
+    return null;
+  }
+
+  const { data: registrationRows, error: registrationError } = await supabase
+    .from('registrations')
+    .select('id, spaces_requested, users(name, business_name)')
+    .eq('event_id', eventId)
+    .order('created_at', { ascending: true });
+  if (registrationError) {
+    throw databaseFailure(registrationError.message);
+  }
+
+  const { data: assignmentRows, error: assignmentError } = await supabase
+    .from('space_assignments')
+    .select('area, spot, registration_id')
+    .eq('event_id', eventId);
+  if (assignmentError) {
+    if (assignmentError.message.includes('space_assignments')) {
+      throw new DatabaseError(
+        503,
+        'Run server/supabase/migrations/20261105180000_space_assignments.sql in the Supabase SQL editor.',
+      );
+    }
+    throw databaseFailure(assignmentError.message);
+  }
+
+  const registrations = ((registrationRows ?? []) as MapRegistrationRow[]).map((row) => {
+    const account = Array.isArray(row.users) ? row.users[0] : row.users;
+    return {
+      id: row.id,
+      name: account?.name ?? 'Registered user',
+      businessName: account?.business_name?.trim() ? account.business_name.trim() : null,
+      spacesRequested: asSpaceList(row.spaces_requested),
+    };
+  });
+  const registrationIds = new Set(registrations.map((registration) => registration.id));
+
+  return {
+    title: event.title,
+    volunteers: event.volunteers,
+    registrations,
+    assignments: ((assignmentRows ?? []) as AssignmentRow[])
+      .filter(
+        (row) =>
+          isMapArea(row.area) &&
+          Number.isInteger(row.spot) &&
+          row.spot >= 1 &&
+          row.spot <= spotLimits[row.area] &&
+          registrationIds.has(row.registration_id),
+      )
+      .map((row) => ({
+        area: row.area as MapArea,
+        spot: row.spot,
+        registrationId: row.registration_id,
+      })),
+  };
+}
+
+export async function saveEventVolunteers(eventId: string, volunteers: string): Promise<void> {
+  const event = await readEventTitle(eventId);
+  if (!event) {
+    throw new DatabaseError(404, 'That event does not exist.');
+  }
+  const { error } = await supabase
+    .from('events')
+    .update({ volunteers: volunteers || null })
+    .eq('id', eventId);
+  if (error) {
+    if (error.message.includes('volunteers')) {
+      throw new DatabaseError(
+        503,
+        'Run server/supabase/migrations/20261105190000_event_volunteers.sql in the Supabase SQL editor.',
+      );
+    }
+    throw databaseFailure(error.message);
+  }
+}
+
+async function readEventTitle(eventId: string): Promise<{ title: string; volunteers: string } | null> {
+  const withVolunteers = await supabase.from('events').select('title, volunteers').eq('id', eventId).maybeSingle();
+  if (withVolunteers.error?.message.includes('volunteers')) {
+    const titleOnly = await supabase.from('events').select('title').eq('id', eventId).maybeSingle();
+    if (titleOnly.error) {
+      throw databaseFailure(titleOnly.error.message);
+    }
+    if (!titleOnly.data) {
+      return null;
+    }
+    return { title: titleOnly.data.title as string, volunteers: '' };
+  }
+  if (withVolunteers.error) {
+    throw databaseFailure(withVolunteers.error.message);
+  }
+  if (!withVolunteers.data) {
+    return null;
+  }
+  const volunteers = withVolunteers.data.volunteers;
+  return {
+    title: withVolunteers.data.title as string,
+    volunteers: typeof volunteers === 'string' ? volunteers : '',
+  };
+}
+
+export async function assignEventSpace(
+  eventId: string,
+  area: MapArea,
+  spot: number,
+  registrationId: string | null,
+): Promise<void> {
+  if (!Number.isInteger(spot) || spot < 1 || spot > spotLimits[area]) {
+    throw new DatabaseError(400, 'That space is not on the map.');
+  }
+  if (registrationId) {
+    const { data: registration, error: registrationError } = await supabase
+      .from('registrations')
+      .select('id')
+      .eq('id', registrationId)
+      .eq('event_id', eventId)
+      .maybeSingle();
+    if (registrationError) {
+      throw databaseFailure(registrationError.message);
+    }
+    if (!registration) {
+      throw new DatabaseError(404, 'That registration does not exist.');
+    }
+  }
+
+  const { error: deleteError } = await supabase
+    .from('space_assignments')
+    .delete()
+    .eq('event_id', eventId)
+    .eq('area', area)
+    .eq('spot', spot);
+  if (deleteError) {
+    throw databaseFailure(deleteError.message);
+  }
+  if (!registrationId) {
+    return;
+  }
+
+  const { error } = await supabase.from('space_assignments').insert({
+    event_id: eventId,
+    registration_id: registrationId,
+    area,
+    spot,
+  });
+  if (error) {
+    throw databaseFailure(error.message);
+  }
+}
+
+type MapRegistrationRow = {
+  id: string;
+  spaces_requested: string[] | null;
+  users:
+    | { name: string; business_name: string | null }
+    | { name: string; business_name: string | null }[]
+    | null;
+};
+
+type AssignmentRow = {
+  area: string;
+  spot: number;
+  registration_id: string;
+};
 
 export async function deleteRegistration(eventId: string, registrationId: string): Promise<void> {
   const { error } = await supabase.from('registrations').delete().eq('id', registrationId).eq('event_id', eventId);

@@ -36,6 +36,7 @@ import { AccountDetailView, AccountList } from './UsersScreen';
 import { colors, pointer, serif } from '../theme';
 import { DateTimeInput } from './DateTimeInput';
 import { FormattedText } from './FormattedText';
+import { MapScreen } from './MapScreen';
 
 const SPACE_OPTIONS = [
   { id: 'grass-generator', label: '10x10 grass plus generator' },
@@ -68,6 +69,7 @@ type Screen =
   | { name: 'detail'; id: string }
   | { name: 'create' }
   | { name: 'edit'; event: EventSummary }
+  | { name: 'map'; id: string }
   | { name: 'users' }
   | { name: 'account'; id: string; back: 'users' | 'detail'; eventId?: string };
 
@@ -125,6 +127,7 @@ export function EventsScreen({ onEditProfile }: { onEditProfile: () => void }) {
           eventId={screen.id}
           onBack={() => setScreen({ name: 'list' })}
           onEdit={(event) => setScreen({ name: 'edit', event })}
+          onOpenMap={() => setScreen({ name: 'map', id: screen.id })}
           onOpenUser={(id) => setScreen({ name: 'account', id, back: 'detail', eventId: screen.id })}
         />
       ) : null}
@@ -162,6 +165,9 @@ export function EventsScreen({ onEditProfile }: { onEditProfile: () => void }) {
           onCancel={() => setScreen({ name: 'detail', id: screen.event.id })}
           onSaved={(id) => setScreen({ name: 'detail', id })}
         />
+      ) : null}
+      {screen.name === 'map' ? (
+        <MapScreen token={token} eventId={screen.id} onBack={() => setScreen({ name: 'detail', id: screen.id })} />
       ) : null}
     </View>
   );
@@ -273,6 +279,7 @@ function EventDetailView({
   eventId,
   onBack,
   onEdit,
+  onOpenMap,
   onOpenUser,
 }: {
   token: string;
@@ -280,6 +287,7 @@ function EventDetailView({
   eventId: string;
   onBack: () => void;
   onEdit: (event: EventSummary) => void;
+  onOpenMap: () => void;
   onOpenUser: (userId: string) => void;
 }) {
   const [detail, setDetail] = useState<EventDetail | null>(null);
@@ -401,9 +409,14 @@ function EventDetailView({
               {event.title}
             </Text>
             {admin ? (
-              <Pressable accessibilityRole="button" onPress={() => onEdit(event)} style={pointer}>
-                <Text style={styles.back}>Edit event</Text>
-              </Pressable>
+              <View style={styles.adminActions}>
+                <Pressable accessibilityRole="button" onPress={() => onEdit(event)} style={pointer}>
+                  <Text style={styles.back}>Edit event</Text>
+                </Pressable>
+                <Pressable accessibilityRole="button" onPress={onOpenMap} style={pointer}>
+                  <Text style={styles.back}>Assign spaces</Text>
+                </Pressable>
+              </View>
             ) : null}
             <Text style={styles.body}>{formatWhen(event.startsAt)}</Text>
             {event.endsAt ? <Text style={styles.muted}>Until {formatWhen(event.endsAt)}</Text> : null}
