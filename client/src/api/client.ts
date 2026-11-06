@@ -51,7 +51,7 @@ export type AccountSummary = {
 };
 
 export type AccountDetail = AccountSummary & {
-  provider: 'google' | 'microsoft';
+  provider: 'google' | 'microsoft' | 'admin';
   venmo: string | null;
   contactPerson: string | null;
   phone: string | null;
@@ -139,6 +139,16 @@ export async function saveVendorProfile(
 
 export function fetchAccounts(token: string): Promise<{ users: AccountSummary[] }> {
   return request('/admin/users', token);
+}
+
+export function createAccount(
+  token: string,
+  input: { name: string; email: string },
+): Promise<{ user: AccountDetail }> {
+  return request('/admin/users', token, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
 }
 
 export function fetchAccount(token: string, userId: string): Promise<{ user: AccountDetail }> {

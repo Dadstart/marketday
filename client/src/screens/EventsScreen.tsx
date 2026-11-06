@@ -38,7 +38,7 @@ import { useAuth } from '../auth/AuthProvider';
 import { parseAddressList, recipientNoun } from '../email/addresses';
 import { descriptionForEditor } from '../description';
 import { Logo } from '../Logo';
-import { AccountDetailView, AccountList } from './UsersScreen';
+import { AccountCreateForm, AccountDetailView, AccountList } from './UsersScreen';
 import { colors, pointer, serif } from '../theme';
 import { DateTimeInput } from './DateTimeInput';
 import { EmailMessageEditor } from './EmailMessageEditor';
@@ -79,6 +79,7 @@ type Screen =
   | { name: 'edit'; event: EventSummary }
   | { name: 'map'; id: string }
   | { name: 'users' }
+  | { name: 'create-user' }
   | { name: 'account'; id: string; back: 'users' | 'detail'; eventId?: string }
   | { name: 'profile' };
 
@@ -86,7 +87,7 @@ function sectionFor(screen: Screen): 'events' | 'users' | 'profile' {
   if (screen.name === 'profile') {
     return 'profile';
   }
-  if (screen.name === 'users' || (screen.name === 'account' && screen.back !== 'detail')) {
+  if (screen.name === 'users' || screen.name === 'create-user' || (screen.name === 'account' && screen.back !== 'detail')) {
     return 'users';
   }
   return 'events';
@@ -153,7 +154,18 @@ export function EventsScreen() {
         />
       ) : null}
       {screen.name === 'users' ? (
-        <AccountList token={token} onOpen={(id) => setScreen({ name: 'account', id, back: 'users' })} />
+        <AccountList
+          token={token}
+          onOpen={(id) => setScreen({ name: 'account', id, back: 'users' })}
+          onCreate={() => setScreen({ name: 'create-user' })}
+        />
+      ) : null}
+      {screen.name === 'create-user' ? (
+        <AccountCreateForm
+          token={token}
+          onCancel={() => setScreen({ name: 'users' })}
+          onCreated={(id) => setScreen({ name: 'account', id, back: 'users' })}
+        />
       ) : null}
       {screen.name === 'profile' ? <VendorProfileScreen embedded onBack={() => setScreen({ name: 'list' })} /> : null}
       {screen.name === 'account' ? (

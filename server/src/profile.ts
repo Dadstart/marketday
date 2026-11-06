@@ -88,6 +88,26 @@ export function parseBrandingImage(value: unknown): string | null {
   return value.trim();
 }
 
+const EMAIL_ADDRESS = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+
+export function parseNewAccount(body: Record<string, unknown>): { name: string; email: string } {
+  if (typeof body.name !== 'string' || body.name.trim().length === 0) {
+    throw new ProfileError("Enter the person's name.");
+  }
+  const name = body.name.trim();
+  if (name.length > 120) {
+    throw new ProfileError('Use 120 characters or fewer.');
+  }
+  if (typeof body.email !== 'string' || !EMAIL_ADDRESS.test(body.email.trim())) {
+    throw new ProfileError('Enter an email address.');
+  }
+  return { name, email: body.email.trim() };
+}
+
+export function presentedProvider(provider: 'google' | 'microsoft', subject: string): 'google' | 'microsoft' | 'admin' {
+  return subject.startsWith('admin:') ? 'admin' : provider;
+}
+
 export function parseAdminNotes(value: unknown): string | null {
   return optionalText(value, 4000, 'Notes');
 }

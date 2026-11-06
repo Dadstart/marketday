@@ -7,7 +7,14 @@ import { DatabaseError, PaymentError, SesError } from './errors.js';
 import { feeCents } from './fees.js';
 import { isEmailAudience, isMapArea, type EmailAudience } from './guards.js';
 import type { EmailMessage } from './mail.js';
-import { parseAdminNotes, parseAvailableSpaces, parseRequestedSpaces, parseVendorProfile, ProfileError } from './profile.js';
+import {
+  parseAdminNotes,
+  parseAvailableSpaces,
+  parseNewAccount,
+  parseRequestedSpaces,
+  parseVendorProfile,
+  ProfileError,
+} from './profile.js';
 import type {
   AccountDetail,
   AccountSummary,
@@ -34,6 +41,7 @@ export type AppServices = {
   listAccounts: () => Promise<AccountSummary[]>;
   getAccount: (userId: string) => Promise<AccountDetail | null>;
   saveAdminAccount: (userId: string, profile: VendorProfileInput, adminNotes: string | null) => Promise<void>;
+  createAdminAccount: (input: { name: string; email: string }) => Promise<AccountDetail>;
   listEvents: (userId: string) => Promise<EventRecord[]>;
   createEvent: (userId: string, input: EventInput) => Promise<EventRecord>;
   deleteEvent: (eventId: string) => Promise<boolean>;
@@ -108,6 +116,7 @@ export function createApp(deps: AppServices) {
     listAccounts,
     getAccount,
     saveAdminAccount,
+    createAdminAccount,
     listEvents,
     createEvent,
     deleteEvent,
@@ -240,6 +249,12 @@ export function createApp(deps: AppServices) {
   app.get('/admin/users', async (c) => {
     const users = await listAccounts();
     return c.json({ users });
+  });
+
+  app.post('/admin/users', async (c) => {
+    const input = parseNewAccount(await readJson(c));
+    const account = await createAdminAccount(input);
+    return c.json({ user: account }, 201);
   });
 
   app.get('/admin/users/:id', async (c) => {
