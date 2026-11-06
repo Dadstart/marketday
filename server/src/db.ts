@@ -3,6 +3,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { isAdminEmail } from './admins.js';
 import { DatabaseError, databaseFailure } from './errors.js';
 import { supabaseServiceRoleKey, supabaseUrl } from './env.js';
+import { canAssignToSpot } from '../../client/src/map/vendors.js';
 import { feeCents } from './fees.js';
 import {
   assertAssignableSpot,
@@ -393,18 +394,8 @@ export async function getUserById(userId: string): Promise<CurrentUser | null> {
 }
 
 export async function saveVendorProfile(userId: string, input: VendorProfileInput): Promise<CurrentUser> {
-  const { data, error } = await supabase
-    .from('users')
-    .update(profileUpdate(input))
-    .eq('id', userId)
-    .select(userColumns)
-    .single();
-
-  if (error || !data) {
-    throw databaseFailure(error?.message);
-  }
-
-  return toCurrentUser(data as UserRow);
+  const saved = await updateProfile(userId, input);
+  return toCurrentUser(saved);
 }
 
 export async function saveAdminAccount(
@@ -412,19 +403,10 @@ export async function saveAdminAccount(
   input: VendorProfileInput,
   adminNotes: string | null,
 ): Promise<void> {
-  const { error } = await supabase
-    .from('users')
-    .update({
-      ...profileUpdate(input),
-      admin_notes: adminNotes,
-    })
-    .eq('id', userId);
-  if (error) {
-    throw databaseFailure(error.message);
-  }
+  await updateProfile(userId, input, adminNotes);
 }
 
-function profileUpdate(input: VendorProfileInput) {
+function profileUpdate(input: VendorProfileInput, includeImage: boolean) {
   return {
     venmo: input.venmo,
     contact_person: input.contactPerson,
@@ -434,13 +416,40 @@ function profileUpdate(input: VendorProfileInput) {
     offering: input.offering,
     products_and_services: input.productsAndServices,
     facebook_name: input.facebookName,
+    ...(includeImage ? { branding_image: input.brandingImage } : {}),
     profile_completed_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
 }
 
+async function updateProfile(userId: string, input: VendorProfileInput, adminNotes?: string | null): Promise<UserRow> {
+  const extra = adminNotes === undefined ? {} : { admin_notes: adminNotes };
+  const saved = await supabase
+    .from('users')
+    .update({ ...profileUpdate(input, true), ...extra })
+    .eq('id', userId)
+    .select(userColumns)
+    .single();
+  if (!saved.error && saved.data) {
+    return saved.data as UserRow;
+  }
+  if (saved.error?.message.includes('branding_image') && !input.brandingImage) {
+    const retry = await supabase
+      .from('users')
+      .update({ ...profileUpdate(input, false), ...extra })
+      .eq('id', userId)
+      .select(userColumns)
+      .single();
+    if (!retry.error && retry.data) {
+      return retry.data as UserRow;
+    }
+    throw profileFailure(retry.error?.message);
+  }
+  throw profileFailure(saved.error?.message);
+}
+
 const profileColumns =
-  'venmo, contact_person, business_name, phone, crosswinds_resident, offering, products_and_services, facebook_name, profile_completed_at';
+  'venmo, contact_person, business_name, phone, crosswinds_resident, offering, products_and_services, facebook_name, branding_image, profile_completed_at';
 
 type ProfileRow = {
   venmo: string | null;
@@ -451,17 +460,43 @@ type ProfileRow = {
   offering: string | null;
   products_and_services: string | null;
   facebook_name: string | null;
+  branding_image: string | null;
   profile_completed_at: string | null;
 };
+
+function profileFailure(message: string | undefined): DatabaseError {
+  if (message?.includes('branding_image')) {
+    return new DatabaseError(
+      503,
+      'Run server/supabase/migrations/20261105200000_branding_image.sql in the Supabase SQL editor.',
+    );
+  }
+  return databaseFailure(message);
+}
+
+function storedBrandingImage(value: string | null | undefined): string | null {
+  return value?.startsWith('data:image/') ? value : null;
+}
 
 const offerings = new Set(['retail', 'food', 'service', 'group', 'entertainment']);
 
 export async function getVendorProfile(userId: string): Promise<VendorProfileDraft | null> {
-  const { data, error } = await supabase.from('users').select(profileColumns).eq('id', userId).maybeSingle();
-  if (error) {
-    throw databaseFailure(error.message);
+  const selected = await supabase.from('users').select(profileColumns).eq('id', userId).maybeSingle();
+  if (selected.error?.message.includes('branding_image')) {
+    const fallback = await supabase
+      .from('users')
+      .select(profileColumns.replace(', branding_image', ''))
+      .eq('id', userId)
+      .maybeSingle();
+    if (fallback.error) {
+      throw profileFailure(fallback.error.message);
+    }
+    return fallback.data ? toProfileDraft({ ...(fallback.data as unknown as ProfileRow), branding_image: null }) : null;
   }
-  return data ? toProfileDraft(data as ProfileRow) : null;
+  if (selected.error) {
+    throw profileFailure(selected.error.message);
+  }
+  return selected.data ? toProfileDraft(selected.data as ProfileRow) : null;
 }
 
 export async function listEvents(userId: string): Promise<EventRecord[]> {
@@ -633,9 +668,9 @@ export async function updateEvent(eventId: string, input: EventInput): Promise<b
 }
 
 const accountSummaryColumns =
-  'id, name, email, business_name, venmo, contact_person, phone, crosswinds_resident, offering, products_and_services, facebook_name, profile_completed_at';
+  'id, name, email, business_name, venmo, contact_person, phone, crosswinds_resident, offering, products_and_services, facebook_name, branding_image, profile_completed_at';
 const accountDetailColumns =
-  'id, name, email, provider, business_name, venmo, contact_person, phone, crosswinds_resident, offering, products_and_services, facebook_name, admin_notes, profile_completed_at, created_at';
+  'id, name, email, provider, business_name, venmo, contact_person, phone, crosswinds_resident, offering, products_and_services, facebook_name, branding_image, admin_notes, profile_completed_at, created_at';
 
 type AccountSummaryRow = {
   id: string;
@@ -649,6 +684,7 @@ type AccountSummaryRow = {
   offering: string | null;
   products_and_services: string | null;
   facebook_name: string | null;
+  branding_image: string | null;
   profile_completed_at: string | null;
 };
 
@@ -666,11 +702,23 @@ type AccountDetailRow = AccountSummaryRow & {
 };
 
 export async function listAccounts(): Promise<AccountSummary[]> {
-  const { data, error } = await supabase.from('users').select(accountSummaryColumns).order('name', { ascending: true });
-  if (error) {
-    throw databaseFailure(error.message);
+  const selected = await supabase.from('users').select(accountSummaryColumns).order('name', { ascending: true });
+  if (selected.error?.message.includes('branding_image')) {
+    const fallback = await supabase
+      .from('users')
+      .select(accountSummaryColumns.replace(', branding_image', ''))
+      .order('name', { ascending: true });
+    if (fallback.error) {
+      throw profileFailure(fallback.error.message);
+    }
+    return ((fallback.data ?? []) as unknown as AccountSummaryRow[]).map((row) =>
+      toAccountSummary({ ...row, branding_image: null }),
+    );
   }
-  return ((data ?? []) as AccountSummaryRow[]).map(toAccountSummary);
+  if (selected.error) {
+    throw profileFailure(selected.error.message);
+  }
+  return ((selected.data ?? []) as AccountSummaryRow[]).map(toAccountSummary);
 }
 
 export async function emailAudienceCounts(
@@ -728,14 +776,31 @@ type RegistrationEmailRow = {
 };
 
 export async function getAccount(userId: string): Promise<AccountDetail | null> {
-  const { data, error } = await supabase.from('users').select(accountDetailColumns).eq('id', userId).maybeSingle();
-  if (error) {
-    throw databaseFailure(error.message);
+  const selected = await supabase.from('users').select(accountDetailColumns).eq('id', userId).maybeSingle();
+  if (selected.error?.message.includes('branding_image')) {
+    const fallback = await supabase
+      .from('users')
+      .select(accountDetailColumns.replace(', branding_image', ''))
+      .eq('id', userId)
+      .maybeSingle();
+    if (fallback.error) {
+      throw profileFailure(fallback.error.message);
+    }
+    if (!fallback.data) {
+      return null;
+    }
+    return accountDetailFrom({ ...(fallback.data as unknown as AccountDetailRow), branding_image: null });
   }
-  if (!data) {
+  if (selected.error) {
+    throw profileFailure(selected.error.message);
+  }
+  if (!selected.data) {
     return null;
   }
-  const row = data as AccountDetailRow;
+  return accountDetailFrom(selected.data as AccountDetailRow);
+}
+
+function accountDetailFrom(row: AccountDetailRow): AccountDetail {
   return {
     ...toAccountSummary(row),
     provider: row.provider,
@@ -758,6 +823,7 @@ function toAccountSummary(row: AccountSummaryRow): AccountSummary {
     email: row.email,
     businessName: blankToNull(row.business_name),
     profileComplete: isProfileComplete(row),
+    brandingImage: storedBrandingImage(row.branding_image),
   };
 }
 
@@ -974,7 +1040,7 @@ export async function assignEventSpace(
   if (registrationId) {
     const { data: registration, error: registrationError } = await supabase
       .from('registrations')
-      .select('id')
+      .select('id, spaces_requested')
       .eq('id', registrationId)
       .eq('event_id', eventId)
       .maybeSingle();
@@ -983,6 +1049,30 @@ export async function assignEventSpace(
     }
     if (!registration) {
       throw new DatabaseError(404, 'That registration does not exist.');
+    }
+    const { data: assignedRows, error: assignedError } = await supabase
+      .from('space_assignments')
+      .select('area, spot, registration_id')
+      .eq('event_id', eventId)
+      .eq('registration_id', registrationId);
+    if (assignedError) {
+      if (assignedError.message.includes('space_assignments')) {
+        throw new DatabaseError(
+          503,
+          'Run server/supabase/migrations/20261105180000_space_assignments.sql in the Supabase SQL editor.',
+        );
+      }
+      throw databaseFailure(assignedError.message);
+    }
+    const assignments = ((assignedRows ?? []) as AssignmentRow[])
+      .filter((row) => isMapArea(row.area))
+      .map((row) => ({
+        area: row.area as MapArea,
+        spot: row.spot,
+        registrationId: row.registration_id,
+      }));
+    if (!canAssignToSpot(asSpaceList(registration.spaces_requested), assignments, registrationId, area, spot)) {
+      throw new DatabaseError(400, 'That vendor did not request another space of that type.');
     }
   }
 
@@ -1194,6 +1284,7 @@ function toProfileDraft(row: ProfileRow): VendorProfileDraft {
     offering: row.offering && offerings.has(row.offering) ? (row.offering as VendorProfileDraft['offering']) : null,
     productsAndServices: row.products_and_services?.trim() ?? '',
     facebookName: row.facebook_name?.trim() ?? '',
+    brandingImage: storedBrandingImage(row.branding_image),
   };
 }
 

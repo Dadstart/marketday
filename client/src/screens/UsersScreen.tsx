@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import {
   fetchAccount,
@@ -10,6 +10,7 @@ import {
   type VendorProfileInput,
 } from '../api/client';
 import { colors, pointer, serif } from '../theme';
+import { BrandingImageField } from './BrandingImageField';
 
 const OFFERING_OPTIONS = [
   { id: 'retail', label: 'Retail products' },
@@ -30,15 +31,7 @@ function knownOffering(offering: string | null): VendorProfileInput['offering'] 
   return OFFERING_OPTIONS.some((option) => option.id === offering) ? (offering as VendorProfileInput['offering']) : null;
 }
 
-export function AccountList({
-  token,
-  onOpen,
-  onBack,
-}: {
-  token: string;
-  onOpen: (id: string) => void;
-  onBack: () => void;
-}) {
+export function AccountList({ token, onOpen }: { token: string; onOpen: (id: string) => void }) {
   const [users, setUsers] = useState<AccountSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -56,9 +49,6 @@ export function AccountList({
   return (
     <ScrollView style={styles.flex} contentContainerStyle={styles.content}>
       <View style={styles.column}>
-        <Pressable accessibilityRole="button" onPress={onBack} style={pointer}>
-          <Text style={styles.back}>Events</Text>
-        </Pressable>
         <Text style={styles.title} accessibilityRole="header">
           Users
         </Text>
@@ -72,10 +62,20 @@ export function AccountList({
             onPress={() => onOpen(account.id)}
             style={({ pressed }) => [styles.card, pressed && styles.pressed, pointer]}
           >
-            <Text style={styles.cardTitle}>{account.name}</Text>
-            <Text style={styles.muted}>{account.email}</Text>
-            <Text style={styles.muted}>{account.businessName ?? 'No business name yet'}</Text>
-            <Text style={styles.link}>View details</Text>
+            <View style={styles.cardText}>
+              <Text style={styles.cardTitle}>{account.name}</Text>
+              <Text style={styles.muted}>{account.email}</Text>
+              <Text style={styles.muted}>{account.businessName ?? 'No business name yet'}</Text>
+              <Text style={styles.link}>View details</Text>
+            </View>
+            {account.brandingImage ? (
+              <Image
+                accessibilityLabel={`${account.name} branding image`}
+                source={{ uri: account.brandingImage }}
+                style={styles.cardImage}
+                resizeMode="cover"
+              />
+            ) : null}
           </Pressable>
         ))}
       </View>
@@ -127,6 +127,16 @@ export function AccountDetailView({
             <Pressable accessibilityRole="button" onPress={() => setEditing(true)} style={pointer}>
               <Text style={styles.back}>Edit details</Text>
             </Pressable>
+            {account.brandingImage ? (
+              <Image
+                accessibilityLabel="Branding image"
+                source={{ uri: account.brandingImage }}
+                style={styles.branding}
+                resizeMode="contain"
+              />
+            ) : (
+              <Detail label="Branding image" value={null} />
+            )}
             <Detail label="Business name" value={account.businessName} />
             <Detail label="Contact person" value={account.contactPerson} />
             <Detail label="Phone number" value={account.phone} />
@@ -177,6 +187,7 @@ function AccountEditor({
   const [offering, setOffering] = useState<VendorProfileInput['offering'] | null>(knownOffering(account.offering));
   const [productsAndServices, setProductsAndServices] = useState(account.productsAndServices ?? '');
   const [facebookName, setFacebookName] = useState(account.facebookName ?? '');
+  const [brandingImage, setBrandingImage] = useState<string | null>(account.brandingImage);
   const [adminNotes, setAdminNotes] = useState(account.adminNotes ?? '');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -202,6 +213,7 @@ function AccountEditor({
         offering,
         productsAndServices: productsAndServices.trim(),
         facebookName: facebookName.trim() || null,
+        brandingImage,
         adminNotes: adminNotes.trim() || null,
       });
       onSaved(result.user);
@@ -223,6 +235,7 @@ function AccountEditor({
       <Field label="Venmo account name or phone number" value={venmo} onChangeText={setVenmo} />
       <Field label="Contact person" value={contactPerson} onChangeText={setContactPerson} />
       <Field label="Name of business" value={businessName} onChangeText={setBusinessName} />
+      <BrandingImageField value={brandingImage} onChange={setBrandingImage} onError={setError} />
       <Field label="Phone number" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
       <Text style={styles.detailLabel}>Crosswinds resident</Text>
       <View style={styles.choiceRow}>
@@ -257,6 +270,7 @@ function AccountEditor({
         placeholder="Only administrators can see this"
         multiline
       />
+      {error ? <Text style={styles.error}>{error}</Text> : null}
       <View style={styles.choiceRow}>
         <Pressable
           accessibilityRole="button"
@@ -338,6 +352,7 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   content: {
     paddingHorizontal: 24,
+    paddingTop: 20,
     paddingBottom: 40,
   },
   column: {
@@ -368,12 +383,24 @@ const styles = StyleSheet.create({
     lineHeight: 24,
   },
   card: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: colors.card,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: colors.line,
     padding: 16,
+    gap: 16,
+  },
+  cardText: {
+    flex: 1,
     gap: 4,
+  },
+  cardImage: {
+    width: 88,
+    height: 88,
+    borderRadius: 12,
+    backgroundColor: colors.background,
   },
   cardTitle: {
     color: colors.ink,
@@ -387,6 +414,15 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   detail: { gap: 2, marginTop: 8 },
+  branding: {
+    width: 240,
+    height: 160,
+    marginTop: 8,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 12,
+  },
   detailLabel: {
     color: colors.ink,
     fontSize: 14,

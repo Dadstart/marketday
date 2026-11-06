@@ -3,13 +3,13 @@ import { describe, test } from 'node:test';
 
 import { parseAddressList, recipientNoun } from '../../client/src/email/addresses.js';
 import { MAP_SPOTS, areaLabel, spotLimit } from '../../client/src/map/spots.js';
-import { requestedLabel, unassignedVendors, vendorLabel, vendorOptionLabel } from '../../client/src/map/vendors.js';
+import { canAssignToSpot, requestedLabel, unassignedVendors, vendorLabel, vendorOptionLabel } from '../../client/src/map/vendors.js';
 import type { EventMap, MapRegistration } from '../../client/src/api/client.js';
 import { isAdminEmail } from './admins.js';
 import { databaseFailure, DatabaseError } from './errors.js';
 import { feeCents, GUEST_FEE_CENTS, isBoothFee, RESIDENT_FEE_CENTS } from './fees.js';
 import { assertAssignableSpot, mapSpotLimit, mergeSpaceLists, uniqueRecipients } from './guards.js';
-import { parseAvailableSpaces, parseRequestedSpaces, parseVendorProfile, ProfileError } from './profile.js';
+import { parseAvailableSpaces, parseBrandingImage, parseRequestedSpaces, parseVendorProfile, ProfileError } from './profile.js';
 
 describe('booth fees', () => {
   test('a resident pays five dollars and everyone else pays ten', () => {
@@ -52,6 +52,7 @@ describe('vendor profiles', () => {
     assert.equal(parsed.venmo, '@market');
     assert.equal(parsed.phone, '(512) 555-1212');
     assert.equal(parsed.facebookName, null);
+    assert.equal(parsed.brandingImage, null);
     assert.equal(parsed.crosswindsResident, true);
   });
 
@@ -59,6 +60,17 @@ describe('vendor profiles', () => {
     assert.throws(() => parseVendorProfile({ ...profile, phone: '555-1212' }), ProfileError);
     assert.throws(() => parseVendorProfile({ ...profile, offering: 'crafts' }), ProfileError);
     assert.throws(() => parseVendorProfile({ ...profile, crosswindsResident: 'yes' }), ProfileError);
+  });
+
+  test('keeps a small picture and rejects anything that is not a PNG, JPEG, GIF, or WebP', () => {
+    const png = `data:image/png;base64,${Buffer.from('logo').toString('base64')}`;
+    assert.equal(parseBrandingImage(png), png);
+    assert.equal(parseBrandingImage(''), null);
+    assert.equal(parseBrandingImage(null), null);
+    assert.throws(() => parseBrandingImage('data:image/svg+xml;base64,PHN2Zy8+'), /PNG, JPEG/);
+    assert.throws(() => parseVendorProfile({ ...profile, brandingImage: 'https://example.com/logo.png' }), /PNG, JPEG/);
+    const oversized = `data:image/png;base64,${Buffer.alloc(1_500_001).toString('base64')}`;
+    assert.throws(() => parseBrandingImage(oversized), /1\.5 MB/);
   });
 
   test('requested spaces keep duplicates and available spaces do not', () => {
@@ -182,21 +194,40 @@ describe('map vendor choices', () => {
     assert.equal(requestedLabel([]), 'Not chosen');
   });
 
-  test('hides a vendor who already fills every requested space, and keeps the current occupant', () => {
+  test('offers a vendor only for the spaces they still have left, without listing them twice', () => {
+    const mixed: MapRegistration = {
+      id: 'mixed',
+      name: 'Mixed Vendor',
+      businessName: 'Both',
+      spacesRequested: ['grass', 'grass-generator', 'pavilion'],
+    };
+    const duplicate: MapRegistration = { ...ada, id: 'ada' };
     const map: EventMap = {
       title: 'Community Day',
       volunteers: '',
-      registrations: [ada, grace, food],
+      registrations: [ada, grace, food, mixed, duplicate],
       assignments: [
         { area: 'pavilion', spot: 1, registrationId: 'ada' },
         { area: 'pavilion', spot: 2, registrationId: 'ada' },
         { area: 'grass', spot: 1, registrationId: 'grace' },
+        { area: 'grass', spot: 3, registrationId: 'mixed' },
       ],
     };
-    const choices = unassignedVendors(map, 'pavilion', 'ada').map((vendor) => vendor.id);
-    assert.deepEqual(choices, ['ada', 'food']);
-    const open = unassignedVendors(map, 'grass', null).map((vendor) => vendor.id);
-    assert.deepEqual(open, ['food']);
+    assert.deepEqual(unassignedVendors(map, 'pavilion', 'ada').map((vendor) => vendor.id), ['ada', 'mixed']);
+    assert.deepEqual(unassignedVendors(map, 'grass', null).map((vendor) => vendor.id), ['mixed']);
+    assert.deepEqual(unassignedVendors(map, 'food-truck', null).map((vendor) => vendor.id), []);
+    assert.equal(
+      canAssignToSpot(mixed.spacesRequested, map.assignments, 'mixed', 'grass', 4),
+      true,
+    );
+    assert.equal(
+      canAssignToSpot(mixed.spacesRequested, map.assignments, 'mixed', 'pavilion', 4),
+      true,
+    );
+    assert.equal(canAssignToSpot(grace.spacesRequested, map.assignments, 'grace', 'grass', 2), false);
+    assert.equal(canAssignToSpot(grace.spacesRequested, map.assignments, 'grace', 'pavilion', 1), false);
+    assert.equal(canAssignToSpot(food.spacesRequested, map.assignments, 'food', 'food-truck', 1), false);
+    assert.equal(canAssignToSpot(grace.spacesRequested, map.assignments, 'grace', 'grass', 1), true);
   });
 });
 

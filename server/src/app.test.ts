@@ -202,6 +202,35 @@ describe('events and registration', () => {
     const response = await call(app, 'POST', '/events/event-1/registrations', { body: { spacesRequested: [] } });
     assert.equal(response.status, 400);
   });
+
+  test('saves a branding image with the profile and rejects a file that is not a picture', async () => {
+    const profile = {
+      venmo: '@market',
+      contactPerson: 'Ada Lovelace',
+      businessName: 'Analytical Engines',
+      phone: '(512) 555-1212',
+      crosswindsResident: true,
+      offering: 'retail',
+      productsAndServices: 'Prints',
+      facebookName: null,
+      brandingImage: null,
+    };
+    let saved: string | null = 'unset';
+    const app = appFor(person(), {
+      saveVendorProfile: async (_userId, input) => {
+        saved = input.brandingImage;
+        return person();
+      },
+    });
+    const png = `data:image/png;base64,${Buffer.from('logo').toString('base64')}`;
+    assert.equal((await call(app, 'PUT', '/me/profile', { body: { ...profile, brandingImage: png } })).status, 200);
+    assert.equal(saved, png);
+    const rejected = await call(app, 'PUT', '/me/profile', {
+      body: { ...profile, brandingImage: 'data:text/html;base64,YQ==' },
+    });
+    assert.equal(rejected.status, 400);
+    assert.equal(saved, png);
+  });
 });
 
 describe('canceling and refunding', () => {

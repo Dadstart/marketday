@@ -34,32 +34,43 @@ export function requestedLabel(spaces: MapRegistration['spacesRequested']): stri
     .join(', ');
 }
 
+const AREA_SPACES: Record<MapArea, readonly MapRegistration['spacesRequested'][number][]> = {
+  pavilion: ['pavilion'],
+  grass: ['grass', 'grass-generator'],
+  'food-truck': ['food-truck'],
+};
+
+export function requestedInArea(spaces: MapRegistration['spacesRequested'], area: MapArea): number {
+  const accepted = AREA_SPACES[area];
+  return spaces.filter((space) => accepted.includes(space)).length;
+}
+
+export function canAssignToSpot(
+  spacesRequested: MapRegistration['spacesRequested'],
+  assignments: EventMap['assignments'],
+  registrationId: string,
+  area: MapArea,
+  spot: number,
+): boolean {
+  const assignedElsewhere = assignments.filter(
+    (item) => item.registrationId === registrationId && item.area === area && item.spot !== spot,
+  ).length;
+  return assignedElsewhere < requestedInArea(spacesRequested, area);
+}
+
 export function unassignedVendors(map: EventMap, area: MapArea, currentId: string | null): MapRegistration[] {
+  const seen = new Set<string>();
   return map.registrations
     .filter((registration) => {
+      if (seen.has(registration.id)) {
+        return false;
+      }
+      seen.add(registration.id);
       if (registration.id === currentId) {
         return true;
       }
-      const assigned = map.assignments.filter((item) => item.registrationId === registration.id).length;
-      const requested = Math.max(registration.spacesRequested.length, 1);
-      return assigned < requested;
+      const assigned = map.assignments.filter((item) => item.registrationId === registration.id && item.area === area).length;
+      return assigned < requestedInArea(registration.spacesRequested, area);
     })
-    .sort((left, right) => {
-      const leftMatch = matchesArea(left, area) ? 0 : 1;
-      const rightMatch = matchesArea(right, area) ? 0 : 1;
-      if (leftMatch !== rightMatch) {
-        return leftMatch - rightMatch;
-      }
-      return vendorLabel(left).localeCompare(vendorLabel(right));
-    });
-}
-
-function matchesArea(registration: MapRegistration, area: MapArea): boolean {
-  if (area === 'pavilion') {
-    return registration.spacesRequested.includes('pavilion');
-  }
-  if (area === 'food-truck') {
-    return registration.spacesRequested.includes('food-truck');
-  }
-  return registration.spacesRequested.includes('grass') || registration.spacesRequested.includes('grass-generator');
+    .sort((left, right) => vendorLabel(left).localeCompare(vendorLabel(right)));
 }
