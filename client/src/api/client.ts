@@ -1,6 +1,16 @@
 import type { SessionUser, StoredSession } from '../auth/types';
+import { resolveApiUrl } from './apiUrl';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8787';
+const API_URL = resolveApiUrl(
+  process.env.EXPO_PUBLIC_API_URL,
+  typeof window === 'undefined'
+    ? undefined
+    : {
+        protocol: window.location.protocol,
+        hostname: window.location.hostname,
+        origin: window.location.origin,
+      },
+);
 
 export class ApiError extends Error {
   constructor(
@@ -166,11 +176,11 @@ export function updateAccount(
   });
 }
 
-export function fetchEvents(token: string): Promise<{ events: EventSummary[] }> {
+export function fetchEvents(token: string | null): Promise<{ events: EventSummary[] }> {
   return request('/events', token);
 }
 
-export function fetchEvent(token: string, eventId: string): Promise<EventDetail> {
+export function fetchEvent(token: string | null, eventId: string): Promise<EventDetail> {
   return request(`/events/${eventId}`, token);
 }
 

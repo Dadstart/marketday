@@ -208,6 +208,43 @@ describe('access', () => {
     assert.equal(vendor.status, 403);
   });
 
+  test('anyone can browse events, and registering still requires a sign-in', async () => {
+    let listedFor: string | null | undefined;
+    let viewedAs: CurrentUser | null | undefined;
+    const browse = appFor(person(), {
+      listEvents: async (userId) => {
+        listedFor = userId;
+        return [eventRecord({ registered: false })];
+      },
+      getEvent: async (_eventId, user) => {
+        viewedAs = user;
+        return detail({ registered: false });
+      },
+    });
+
+    const listed = await call(browse, 'GET', '/events', { token: null });
+    assert.equal(listed.status, 200);
+    assert.equal(listedFor, null);
+
+    const viewed = await call(browse, 'GET', '/events/event-1', { token: null });
+    assert.equal(viewed.status, 200);
+    assert.equal(viewedAs, null);
+
+    const signedIn = await call(browse, 'GET', '/events');
+    assert.equal(signedIn.status, 200);
+    assert.equal(listedFor, 'user-1');
+
+    const map = await call(browse, 'GET', '/events/event-1/map', { token: null });
+    assert.equal(map.status, 401);
+
+    const register = await call(browse, 'POST', '/events/event-1/registrations', {
+      token: null,
+      body: { spacesRequested: ['grass'] },
+    });
+    assert.equal(register.status, 401);
+    assert.match(register.body?.error ?? '', /Sign in/);
+  });
+
   test('a broken session asks the person to sign in again', async () => {
     const app = appFor(person(), { verifySession: async () => { throw new Error('bad token'); } });
     const response = await call(app, 'GET', '/me');

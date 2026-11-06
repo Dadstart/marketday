@@ -520,11 +520,11 @@ export async function getVendorProfile(userId: string): Promise<VendorProfileDra
   return selected.data ? toProfileDraft(selected.data as ProfileRow) : null;
 }
 
-export async function listEvents(userId: string): Promise<EventRecord[]> {
+export async function listEvents(userId: string | null): Promise<EventRecord[]> {
   const [events, registrations, boothFee] = await Promise.all([
     selectEvents(),
     selectRegistrations(),
-    getBoothFee(userId),
+    userId ? getBoothFee(userId) : Promise.resolve(null),
   ]);
   const counts = new Map<string, number>();
   const mine = new Set<string>();
@@ -534,7 +534,7 @@ export async function listEvents(userId: string): Promise<EventRecord[]> {
 
   for (const registration of registrations) {
     counts.set(registration.event_id, (counts.get(registration.event_id) ?? 0) + 1);
-    if (registration.user_id === userId) {
+    if (userId && registration.user_id === userId) {
       mine.add(registration.event_id);
       spaces.set(registration.event_id, asSpaceList(registration.spaces_requested));
       if (registration.paid_at) {
@@ -561,7 +561,7 @@ export async function listEvents(userId: string): Promise<EventRecord[]> {
 
 export async function getEvent(
   eventId: string,
-  user: CurrentUser,
+  user: CurrentUser | null,
 ): Promise<{ event: EventRecord; registrations: RegistrationRecord[] } | null> {
   const { data, error } = await supabase
     .from('events')
@@ -589,30 +589,32 @@ export async function getEvent(
   }
 
   const rows = (registrationRows ?? []) as RegistrantRow[];
-  const registrations = rows.map((row) => {
-    const account = Array.isArray(row.users) ? row.users[0] : row.users;
-    const email = account?.email ?? null;
-    const showEmail = user.admin || row.user_id === user.id;
-    return {
-      id: row.id,
-      userId: user.admin ? row.user_id : null,
-      name: account?.name ?? 'Registered user',
-      email: showEmail ? email : null,
-      paid: user.admin ? row.paid_at != null : null,
-      refundable: user.admin ? row.paid_at != null && Boolean(row.stripe_checkout_session_id) : false,
-      amountCents: user.admin ? row.amount_cents : null,
-      spacesRequested: user.admin ? asSpaceList(row.spaces_requested) : [],
-      createdAt: row.created_at,
-    };
-  });
+  const registrations = user
+    ? rows.map((row) => {
+        const account = Array.isArray(row.users) ? row.users[0] : row.users;
+        const email = account?.email ?? null;
+        const showEmail = user.admin || row.user_id === user.id;
+        return {
+          id: row.id,
+          userId: user.admin ? row.user_id : null,
+          name: account?.name ?? 'Registered user',
+          email: showEmail ? email : null,
+          paid: user.admin ? row.paid_at != null : null,
+          refundable: user.admin ? row.paid_at != null && Boolean(row.stripe_checkout_session_id) : false,
+          amountCents: user.admin ? row.amount_cents : null,
+          spacesRequested: user.admin ? asSpaceList(row.spaces_requested) : [],
+          createdAt: row.created_at,
+        };
+      })
+    : [];
 
-  const mine = rows.find((row) => row.user_id === user.id);
-  const boothFee = await getBoothFee(user.id);
+  const mine = user ? rows.find((row) => row.user_id === user.id) : undefined;
+  const boothFee = user ? await getBoothFee(user.id) : null;
 
   return {
     event: toEventRecord(
       data as EventRow,
-      registrations.length,
+      rows.length,
       mine != null,
       mine?.paid_at != null,
       mine?.paid_at != null && Boolean(mine.stripe_checkout_session_id),

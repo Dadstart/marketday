@@ -83,3 +83,21 @@ Microsoft sign-in uses the authorization code flow with PKCE on every platform. 
 ## What is stored
 
 Users, events, and registrations live in Supabase. After sign-in, the app keeps a session token on the device until it expires or you sign out. iOS and Android use the keychain and encrypted storage. The web app uses `localStorage`. The Google or Microsoft identity token is checked once by the server and is not saved.
+
+## Deployment
+
+### Client
+cd /home/andrew/pi/marketday
+git pull
+cd client
+node --env-file=../.env ./node_modules/expo/bin/cli export --platform web
+sudo rm -rf /var/www/communityday/*
+sudo cp -a dist/. /var/www/communityday/
+sudo chown -R caddy:caddy /var/www/communityday
+
+### API
+cd /home/andrew/pi/marketday
+git pull
+npm --prefix server install
+sudo systemctl restart marketday-api
+sudo systemctl status marketday-api
