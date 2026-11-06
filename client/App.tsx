@@ -1,12 +1,14 @@
 import { StatusBar } from 'expo-status-bar';
 import * as WebBrowser from 'expo-web-browser';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 import { AuthProvider, useAuth } from './src/auth/AuthProvider';
 import { isWebSignInReturn } from './src/auth/webRedirect';
+import { legalDocumentFromPath, type LegalDocumentName } from './src/legal';
 import { LegalFooter } from './src/LegalFooter';
+import { LegalDocumentScreen } from './src/screens/LegalDocumentScreen';
 import { EventsScreen } from './src/screens/EventsScreen';
 import { PublicEventsScreen } from './src/screens/PublicEventsScreen';
 import { VendorProfileScreen } from './src/screens/VendorProfileScreen';
@@ -56,8 +58,16 @@ export default function App() {
   );
 }
 
+function legalFromLocation(): LegalDocumentName | null {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') {
+    return null;
+  }
+  return legalDocumentFromPath(window.location.pathname);
+}
+
 function Root() {
   const { user, ready } = useAuth();
+  const [legal, setLegal] = useState<LegalDocumentName | null>(() => legalFromLocation());
   const [resumeEventId, setResumeEventId] = useState<string | null>(() => readResumeEvent());
   const wasSignedIn = useRef(false);
 
@@ -78,6 +88,13 @@ function Root() {
     setResumeEventId(eventId);
   }
 
+  function closeLegal() {
+    setLegal(null);
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && legalDocumentFromPath(window.location.pathname)) {
+      window.history.pushState({}, '', '/');
+    }
+  }
+
   let screen = <PublicEventsScreen onViewingEvent={viewEvent} />;
   if (user && !user.admin && !user.profileComplete) {
     screen = <VendorProfileScreen />;
@@ -88,7 +105,9 @@ function Root() {
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.main}>
-        {ready ? (
+        {legal ? (
+          <LegalDocumentScreen name={legal} onBack={closeLegal} />
+        ) : ready ? (
           screen
         ) : (
           <View style={styles.loading}>
@@ -96,7 +115,7 @@ function Root() {
           </View>
         )}
       </View>
-      <LegalFooter />
+      <LegalFooter onOpen={setLegal} />
     </SafeAreaView>
   );
 }

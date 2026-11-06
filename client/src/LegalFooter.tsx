@@ -1,18 +1,31 @@
-import { Linking, Platform, StyleSheet, Text, View, type TextStyle } from 'react-native';
+import { Platform, StyleSheet, Text, View, type TextStyle } from 'react-native';
 
+import { type LegalDocumentName } from './legal';
 import { colors } from './theme';
 
-export function LegalFooter() {
+export function LegalFooter({ onOpen }: { onOpen: (name: LegalDocumentName) => void }) {
   return (
     <View style={styles.footer}>
-      <LegalLink href="/privacy.html">Privacy</LegalLink>
+      <LegalLink href="/privacy.html" onOpen={() => onOpen('privacy')}>
+        Privacy
+      </LegalLink>
       <Text style={styles.separator}>·</Text>
-      <LegalLink href="/tos.html">Terms of Service</LegalLink>
+      <LegalLink href="/tos.html" onOpen={() => onOpen('terms')}>
+        Terms of Service
+      </LegalLink>
     </View>
   );
 }
 
-function LegalLink({ href, children }: { href: string; children: string }) {
+function LegalLink({
+  href,
+  onOpen,
+  children,
+}: {
+  href: string;
+  onOpen: () => void;
+  children: string;
+}) {
   return (
     <Text
       accessibilityRole="link"
@@ -20,9 +33,7 @@ function LegalLink({ href, children }: { href: string; children: string }) {
       {...(Platform.OS === 'web'
         ? { href }
         : {
-            onPress: () => {
-              void Linking.openURL(href);
-            },
+            onPress: onOpen,
           })}
     >
       {children}
