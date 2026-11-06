@@ -1,4 +1,5 @@
 export type ProviderName = 'google' | 'microsoft';
+export type AccountProvider = ProviderName | 'admin';
 
 export type Identity = {
   provider: ProviderName;
@@ -111,7 +112,7 @@ export type AccountSummary = {
 };
 
 export type AccountDetail = AccountSummary & {
-  provider: ProviderName;
+  provider: AccountProvider;
   venmo: string | null;
   contactPerson: string | null;
   phone: string | null;

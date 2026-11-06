@@ -9,7 +9,15 @@ import { isAdminEmail } from './admins.js';
 import { databaseFailure, DatabaseError } from './errors.js';
 import { feeCents, GUEST_FEE_CENTS, isBoothFee, RESIDENT_FEE_CENTS } from './fees.js';
 import { assertAssignableSpot, mapSpotLimit, mergeSpaceLists, uniqueRecipients } from './guards.js';
-import { parseAvailableSpaces, parseBrandingImage, parseRequestedSpaces, parseVendorProfile, ProfileError } from './profile.js';
+import {
+  parseAvailableSpaces,
+  parseBrandingImage,
+  parseNewAccount,
+  parseRequestedSpaces,
+  parseVendorProfile,
+  presentedProvider,
+  ProfileError,
+} from './profile.js';
 
 describe('booth fees', () => {
   test('a resident pays five dollars and everyone else pays ten', () => {
@@ -60,6 +68,17 @@ describe('vendor profiles', () => {
     assert.throws(() => parseVendorProfile({ ...profile, phone: '555-1212' }), ProfileError);
     assert.throws(() => parseVendorProfile({ ...profile, offering: 'crafts' }), ProfileError);
     assert.throws(() => parseVendorProfile({ ...profile, crosswindsResident: 'yes' }), ProfileError);
+  });
+
+  test('accepts a name and email for an account an administrator creates', () => {
+    assert.deepEqual(parseNewAccount({ name: '  Ada Lovelace  ', email: 'Ada@Example.com' }), {
+      name: 'Ada Lovelace',
+      email: 'Ada@Example.com',
+    });
+    assert.equal(presentedProvider('google', 'admin:8f1c'), 'admin');
+    assert.equal(presentedProvider('microsoft', 'subject-1'), 'microsoft');
+    assert.throws(() => parseNewAccount({ name: ' ', email: 'ada@example.com' }), /name/);
+    assert.throws(() => parseNewAccount({ name: 'Ada', email: 'ada@' }), /email address/);
   });
 
   test('keeps a small picture and rejects anything that is not a PNG, JPEG, GIF, or WebP', () => {

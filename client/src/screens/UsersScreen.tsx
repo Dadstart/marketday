@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import {
+  createAccount,
   fetchAccount,
   fetchAccounts,
   updateAccount,
@@ -31,7 +32,15 @@ function knownOffering(offering: string | null): VendorProfileInput['offering'] 
   return OFFERING_OPTIONS.some((option) => option.id === offering) ? (offering as VendorProfileInput['offering']) : null;
 }
 
-export function AccountList({ token, onOpen }: { token: string; onOpen: (id: string) => void }) {
+export function AccountList({
+  token,
+  onOpen,
+  onCreate,
+}: {
+  token: string;
+  onOpen: (id: string) => void;
+  onCreate: () => void;
+}) {
   const [users, setUsers] = useState<AccountSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,9 +58,14 @@ export function AccountList({ token, onOpen }: { token: string; onOpen: (id: str
   return (
     <ScrollView style={styles.flex} contentContainerStyle={styles.content}>
       <View style={styles.column}>
-        <Text style={styles.title} accessibilityRole="header">
-          Users
-        </Text>
+        <View style={styles.titleRow}>
+          <Text style={styles.title} accessibilityRole="header">
+            Users
+          </Text>
+          <Pressable accessibilityRole="button" onPress={onCreate} style={[styles.save, pointer]}>
+            <Text style={styles.saveLabel}>Create user</Text>
+          </Pressable>
+        </View>
         {error ? <Text style={styles.error}>{error}</Text> : null}
         {users == null && !error ? <ActivityIndicator color={colors.accent} /> : null}
         {users?.length === 0 ? <Text style={styles.muted}>No accounts yet.</Text> : null}
@@ -122,7 +136,7 @@ export function AccountDetailView({
             </Text>
             <Text style={styles.muted}>{account.email}</Text>
             <Text style={styles.muted}>
-              {account.profileComplete ? 'Profile complete' : 'Profile not finished'} · {account.provider}
+              {account.profileComplete ? 'Profile complete' : 'Profile not finished'} · {accountOrigin(account.provider)}
             </Text>
             <Pressable accessibilityRole="button" onPress={() => setEditing(true)} style={pointer}>
               <Text style={styles.back}>Edit details</Text>
@@ -290,6 +304,87 @@ function AccountEditor({
   );
 }
 
+export function AccountCreateForm({
+  token,
+  onCancel,
+  onCreated,
+}: {
+  token: string;
+  onCancel: () => void;
+  onCreated: (userId: string) => void;
+}) {
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submit() {
+    const trimmedName = name.trim();
+    const trimmedEmail = email.trim();
+    if (!trimmedName) {
+      setError("Enter the person's name.");
+      return;
+    }
+    if (!/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(trimmedEmail)) {
+      setError('Enter an email address.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await createAccount(token, { name: trimmedName, email: trimmedEmail });
+      onCreated(result.user.id);
+    } catch (reason) {
+      setError(reason instanceof Error && reason.message ? reason.message : 'The account could not be created.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <ScrollView style={styles.flex} contentContainerStyle={styles.content}>
+      <View style={styles.column}>
+        <Text style={styles.title} accessibilityRole="header">
+          Create user
+        </Text>
+        <Text style={styles.muted}>
+          They can sign in later with Google or Microsoft using this email. You can fill in their profile after the
+          account is created.
+        </Text>
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+        <Field label="Name" value={name} onChangeText={setName} />
+        <Field
+          label="Email"
+          value={email}
+          onChangeText={setEmail}
+          keyboardType="email-address"
+          autoCapitalize="none"
+        />
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+        <View style={styles.choiceRow}>
+          <Pressable
+            accessibilityRole="button"
+            disabled={busy}
+            onPress={() => {
+              void submit();
+            }}
+            style={({ pressed }) => [styles.save, busy && styles.disabled, pressed && styles.pressed, pointer]}
+          >
+            <Text style={styles.saveLabel}>{busy ? 'Creating…' : 'Create user'}</Text>
+          </Pressable>
+          <Pressable accessibilityRole="button" disabled={busy} onPress={onCancel} style={pointer}>
+            <Text style={styles.back}>Cancel</Text>
+          </Pressable>
+        </View>
+      </View>
+    </ScrollView>
+  );
+}
+
+function accountOrigin(provider: AccountDetail['provider']): string {
+  return provider === 'admin' ? 'Added by an administrator' : provider;
+}
+
 function Field({
   label,
   value,
@@ -297,13 +392,15 @@ function Field({
   placeholder,
   multiline,
   keyboardType,
+  autoCapitalize,
 }: {
   label: string;
   value: string;
   onChangeText: (value: string) => void;
   placeholder?: string;
   multiline?: boolean;
-  keyboardType?: 'default' | 'phone-pad';
+  keyboardType?: 'default' | 'phone-pad' | 'email-address';
+  autoCapitalize?: 'none' | 'sentences';
 }) {
   return (
     <View style={styles.detail}>
@@ -316,6 +413,7 @@ function Field({
         placeholderTextColor={colors.muted}
         multiline={multiline}
         keyboardType={keyboardType}
+        autoCapitalize={autoCapitalize}
         style={[styles.input, multiline && styles.inputMultiline]}
       />
     </View>
@@ -366,11 +464,18 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
   },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
   title: {
     ...serif,
     color: colors.ink,
     fontSize: 36,
     lineHeight: 42,
+    flexShrink: 1,
   },
   muted: {
     color: colors.muted,

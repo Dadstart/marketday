@@ -68,6 +68,7 @@ function services(overrides: Partial<AppServices>): AppServices {
     listAccounts: missing('listAccounts'),
     getAccount: missing('getAccount'),
     saveAdminAccount: missing('saveAdminAccount'),
+    createAdminAccount: missing('createAdminAccount'),
     listEvents: missing('listEvents'),
     createEvent: missing('createEvent'),
     deleteEvent: missing('deleteEvent'),
@@ -164,6 +165,47 @@ describe('access', () => {
 
     const accounts = await call(appFor(person(), { listAccounts: async () => [] }), 'GET', '/admin/users');
     assert.equal(accounts.status, 403);
+  });
+
+  test('an administrator can create a user from a name and email', async () => {
+    let saved: { name: string; email: string } | null = null;
+    const app = appFor(admin, {
+      createAdminAccount: async (input) => {
+        saved = input;
+        return {
+          id: 'new-1',
+          name: input.name,
+          email: input.email,
+          businessName: null,
+          profileComplete: false,
+          brandingImage: null,
+          provider: 'admin',
+          venmo: null,
+          contactPerson: null,
+          phone: null,
+          crosswindsResident: null,
+          offering: null,
+          productsAndServices: null,
+          facebookName: null,
+          adminNotes: null,
+          createdAt: future,
+        };
+      },
+    });
+    const created = await call(app, 'POST', '/admin/users', {
+      body: { name: '  Ada Lovelace ', email: 'ada@example.com' },
+    });
+    assert.equal(created.status, 201);
+    assert.deepEqual(saved, { name: 'Ada Lovelace', email: 'ada@example.com' });
+
+    const invalid = await call(app, 'POST', '/admin/users', { body: { name: 'Ada', email: 'not-an-email' } });
+    assert.equal(invalid.status, 400);
+    assert.match(invalid.body?.error ?? '', /email address/);
+
+    const vendor = await call(appFor(person()), 'POST', '/admin/users', {
+      body: { name: 'Ada', email: 'ada@example.com' },
+    });
+    assert.equal(vendor.status, 403);
   });
 
   test('a broken session asks the person to sign in again', async () => {

@@ -5,6 +5,7 @@ import { DatabaseError, databaseFailure } from './errors.js';
 import { supabaseServiceRoleKey, supabaseUrl } from './env.js';
 import { canAssignToSpot } from '../../client/src/map/vendors.js';
 import { feeCents } from './fees.js';
+import { presentedProvider } from './profile.js';
 import {
   assertAssignableSpot,
   isMapArea,
@@ -406,6 +407,26 @@ export async function saveAdminAccount(
   await updateProfile(userId, input, adminNotes);
 }
 
+export async function createAdminAccount(input: { name: string; email: string }): Promise<AccountDetail> {
+  const inserted = await supabase
+    .from('users')
+    .insert({
+      provider: 'google',
+      provider_subject: `admin:${crypto.randomUUID()}`,
+      email: input.email,
+      name: input.name,
+    })
+    .select(accountDetailColumns)
+    .single();
+  if (inserted.error?.code === '23505') {
+    throw new DatabaseError(409, 'An account with that email already exists.');
+  }
+  if (inserted.error || !inserted.data) {
+    throw databaseFailure(inserted.error?.message);
+  }
+  return accountDetailFrom(inserted.data as AccountDetailRow);
+}
+
 function profileUpdate(input: VendorProfileInput, includeImage: boolean) {
   return {
     venmo: input.venmo,
@@ -670,7 +691,7 @@ export async function updateEvent(eventId: string, input: EventInput): Promise<b
 const accountSummaryColumns =
   'id, name, email, business_name, venmo, contact_person, phone, crosswinds_resident, offering, products_and_services, facebook_name, branding_image, profile_completed_at';
 const accountDetailColumns =
-  'id, name, email, provider, business_name, venmo, contact_person, phone, crosswinds_resident, offering, products_and_services, facebook_name, branding_image, admin_notes, profile_completed_at, created_at';
+  'id, name, email, provider, provider_subject, business_name, venmo, contact_person, phone, crosswinds_resident, offering, products_and_services, facebook_name, branding_image, admin_notes, profile_completed_at, created_at';
 
 type AccountSummaryRow = {
   id: string;
@@ -690,6 +711,7 @@ type AccountSummaryRow = {
 
 type AccountDetailRow = AccountSummaryRow & {
   provider: ProviderName;
+  provider_subject: string;
   venmo: string | null;
   contact_person: string | null;
   phone: string | null;
@@ -803,7 +825,7 @@ export async function getAccount(userId: string): Promise<AccountDetail | null> 
 function accountDetailFrom(row: AccountDetailRow): AccountDetail {
   return {
     ...toAccountSummary(row),
-    provider: row.provider,
+    provider: presentedProvider(row.provider, row.provider_subject),
     venmo: blankToNull(row.venmo),
     contactPerson: blankToNull(row.contact_person),
     phone: blankToNull(row.phone),

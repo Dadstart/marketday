@@ -2,6 +2,7 @@ import { signSession, verifyIdentityToken, verifySession } from './auth.js';
 import { createApp } from './create-app.js';
 import {
   assignEventSpace,
+  createAdminAccount,
   createEvent,
   deleteEvent,
   deleteRegistration,
@@ -50,6 +51,7 @@ export const app = createApp({
   listAccounts,
   getAccount,
   saveAdminAccount,
+  createAdminAccount,
   listEvents,
   createEvent,
   deleteEvent,
