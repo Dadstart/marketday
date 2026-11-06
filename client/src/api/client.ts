@@ -166,11 +166,11 @@ export function updateAccount(
   });
 }
 
-export function fetchEvents(token: string): Promise<{ events: EventSummary[] }> {
+export function fetchEvents(token: string | null): Promise<{ events: EventSummary[] }> {
   return request('/events', token);
 }
 
-export function fetchEvent(token: string, eventId: string): Promise<EventDetail> {
+export function fetchEvent(token: string | null, eventId: string): Promise<EventDetail> {
   return request(`/events/${eventId}`, token);
 }
 

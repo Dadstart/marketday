@@ -7,13 +7,6 @@ import { Logo } from '../Logo';
 import { colors, pointer, serif } from '../theme';
 
 export function SignInScreen() {
-  const auth = useAuth();
-  const missingEnv = [
-    !auth.googleConfigured ? googleClientIdEnvName() : null,
-    !auth.microsoftConfigured ? 'EXPO_PUBLIC_MICROSOFT_CLIENT_ID' : null,
-  ].filter((name): name is string => Boolean(name));
-  const showSetup = missingEnv.length > 0;
-
   return (
     <ScrollView style={styles.flex} contentContainerStyle={styles.content}>
       <View style={styles.card}>
@@ -26,66 +19,90 @@ export function SignInScreen() {
           This website is used for Crosswinds Community and Market Day registrations.
         </Text>
         <Text style={styles.body}>Use your Google or Microsoft account.</Text>
-
-        {auth.error ? (
-          <View style={styles.errorBox}>
-            <Text style={styles.errorText}>{auth.error}</Text>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Dismiss error"
-              onPress={auth.clearError}
-              style={pointer}
-            >
-              <Text style={styles.errorDismiss}>Dismiss</Text>
-            </Pressable>
-          </View>
-        ) : null}
-
-        <AuthButton
-          label={
-            auth.googleConfigured && !auth.googleReady
-              ? 'Preparing Google sign-in…'
-              : 'Continue with Google'
-          }
-          mark="G"
-          disabled={!auth.googleReady || auth.pending != null}
-          busy={auth.pending === 'google'}
-          onPress={auth.signInWithGoogle}
-          variant="light"
-        />
-        <AuthButton
-          label={
-            auth.microsoftConfigured && !auth.microsoftReady
-              ? 'Preparing Microsoft sign-in…'
-              : 'Continue with Microsoft'
-          }
-          mark="M"
-          disabled={!auth.microsoftReady || auth.pending != null}
-          busy={auth.pending === 'microsoft'}
-          onPress={auth.signInWithMicrosoft}
-          variant="dark"
-        />
-
-        {showSetup ? (
-          <View style={styles.setup}>
-            <Text style={styles.setupTitle}>Add client IDs to .env, then restart Expo.</Text>
-            {missingEnv.map((name) => (
-              <Text key={name} selectable style={styles.envName}>
-                {name}
-              </Text>
-            ))}
-            <Text style={styles.setupTitle}>Register these redirect URIs.</Text>
-            <RedirectRow label="Google" uri={auth.googleRedirectUri} />
-            <RedirectRow label="Microsoft" uri={auth.microsoftRedirectUri} />
-          </View>
-        ) : (
-          <RedirectDetails
-            googleRedirectUri={auth.googleRedirectUri}
-            microsoftRedirectUri={auth.microsoftRedirectUri}
-          />
-        )}
+        <SignInActions />
       </View>
     </ScrollView>
+  );
+}
+
+export function SignInPrompt({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+  return (
+    <View style={styles.prompt}>
+      <Text style={styles.promptMessage}>{message}</Text>
+      <SignInActions />
+      <Pressable accessibilityRole="button" onPress={onDismiss} style={pointer}>
+        <Text style={styles.dismiss}>Not now</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function SignInActions() {
+  const auth = useAuth();
+  const missingEnv = [
+    !auth.googleConfigured ? googleClientIdEnvName() : null,
+    !auth.microsoftConfigured ? 'EXPO_PUBLIC_MICROSOFT_CLIENT_ID' : null,
+  ].filter((name): name is string => Boolean(name));
+  const showSetup = missingEnv.length > 0;
+
+  return (
+    <View>
+      {auth.error ? (
+        <View style={styles.errorBox}>
+          <Text style={styles.errorText}>{auth.error}</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss error"
+            onPress={auth.clearError}
+            style={pointer}
+          >
+            <Text style={styles.errorDismiss}>Dismiss</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      <AuthButton
+        label={
+          auth.googleConfigured && !auth.googleReady ? 'Preparing Google sign-in…' : 'Continue with Google'
+        }
+        mark="G"
+        disabled={!auth.googleReady || auth.pending != null}
+        busy={auth.pending === 'google'}
+        onPress={auth.signInWithGoogle}
+        variant="light"
+      />
+      <AuthButton
+        label={
+          auth.microsoftConfigured && !auth.microsoftReady
+            ? 'Preparing Microsoft sign-in…'
+            : 'Continue with Microsoft'
+        }
+        mark="M"
+        disabled={!auth.microsoftReady || auth.pending != null}
+        busy={auth.pending === 'microsoft'}
+        onPress={auth.signInWithMicrosoft}
+        variant="dark"
+      />
+
+      {showSetup ? (
+        <View style={styles.setup}>
+          <Text style={styles.setupTitle}>Add client IDs to .env, then restart Expo.</Text>
+          {missingEnv.map((name) => (
+            <Text key={name} selectable style={styles.envName}>
+              {name}
+            </Text>
+          ))}
+          <Text style={styles.setupTitle}>Register these redirect URIs.</Text>
+          <RedirectRow label="Google" uri={auth.googleRedirectUri} />
+          <RedirectRow label="Microsoft" uri={auth.microsoftRedirectUri} />
+        </View>
+      ) : (
+        <RedirectDetails
+          googleRedirectUri={auth.googleRedirectUri}
+          microsoftRedirectUri={auth.microsoftRedirectUri}
+        />
+      )}
+    </View>
   );
 }
 
@@ -212,6 +229,26 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 24,
     marginBottom: 28,
+  },
+  prompt: {
+    backgroundColor: colors.card,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.line,
+    padding: 16,
+    gap: 4,
+  },
+  promptMessage: {
+    color: colors.ink,
+    fontSize: 16,
+    lineHeight: 24,
+    marginBottom: 12,
+  },
+  dismiss: {
+    color: colors.muted,
+    fontSize: 15,
+    fontWeight: '600',
+    marginTop: 4,
   },
   errorBox: {
     backgroundColor: colors.dangerBackground,

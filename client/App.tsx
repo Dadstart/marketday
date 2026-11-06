@@ -1,5 +1,6 @@
 import { StatusBar } from 'expo-status-bar';
 import * as WebBrowser from 'expo-web-browser';
+import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
@@ -7,11 +8,38 @@ import { AuthProvider, useAuth } from './src/auth/AuthProvider';
 import { isWebSignInReturn } from './src/auth/webRedirect';
 import { LegalFooter } from './src/LegalFooter';
 import { EventsScreen } from './src/screens/EventsScreen';
-import { SignInScreen } from './src/screens/SignInScreen';
+import { PublicEventsScreen } from './src/screens/PublicEventsScreen';
 import { VendorProfileScreen } from './src/screens/VendorProfileScreen';
 import { colors } from './src/theme';
 
 const authPopup = WebBrowser.maybeCompleteAuthSession();
+const resumeEventKey = 'marketday.resumeEvent';
+
+function readResumeEvent(): string | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  try {
+    return window.sessionStorage.getItem(resumeEventKey);
+  } catch {
+    return null;
+  }
+}
+
+function writeResumeEvent(eventId: string | null) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    if (eventId) {
+      window.sessionStorage.setItem(resumeEventKey, eventId);
+    } else {
+      window.sessionStorage.removeItem(resumeEventKey);
+    }
+  } catch {
+    // Sign-in still works if the browser blocks storage. The event list stays available.
+  }
+}
 
 export default function App() {
   if (authPopup.type === 'success' && !isWebSignInReturn()) {
@@ -30,12 +58,31 @@ export default function App() {
 
 function Root() {
   const { user, ready } = useAuth();
+  const [resumeEventId, setResumeEventId] = useState<string | null>(() => readResumeEvent());
+  const wasSignedIn = useRef(false);
 
-  let screen = <SignInScreen />;
+  useEffect(() => {
+    if (user) {
+      wasSignedIn.current = true;
+      writeResumeEvent(null);
+      return;
+    }
+    if (wasSignedIn.current) {
+      wasSignedIn.current = false;
+      setResumeEventId(null);
+    }
+  }, [user]);
+
+  function viewEvent(eventId: string | null) {
+    writeResumeEvent(eventId);
+    setResumeEventId(eventId);
+  }
+
+  let screen = <PublicEventsScreen onViewingEvent={viewEvent} />;
   if (user && !user.admin && !user.profileComplete) {
     screen = <VendorProfileScreen />;
   } else if (user) {
-    screen = <EventsScreen />;
+    screen = <EventsScreen initialEventId={resumeEventId} />;
   }
 
   return (

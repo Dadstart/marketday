@@ -42,13 +42,13 @@ export type AppServices = {
   getAccount: (userId: string) => Promise<AccountDetail | null>;
   saveAdminAccount: (userId: string, profile: VendorProfileInput, adminNotes: string | null) => Promise<void>;
   createAdminAccount: (input: { name: string; email: string }) => Promise<AccountDetail>;
-  listEvents: (userId: string) => Promise<EventRecord[]>;
+  listEvents: (userId: string | null) => Promise<EventRecord[]>;
   createEvent: (userId: string, input: EventInput) => Promise<EventRecord>;
   deleteEvent: (eventId: string) => Promise<boolean>;
   updateEvent: (eventId: string, input: EventInput) => Promise<boolean>;
   getEvent: (
     eventId: string,
-    user: CurrentUser,
+    user: CurrentUser | null,
   ) => Promise<{ event: EventRecord; registrations: RegistrationRecord[] } | null>;
   registerForEvent: (eventId: string, userId: string, spaces: SpaceRequest[]) => Promise<void>;
   getOwnedRegistration: (
@@ -149,8 +149,7 @@ export function createApp(deps: AppServices) {
   const app = new Hono<{ Variables: AppVariables }>();
 
   const requireUser: MiddlewareHandler<{ Variables: AppVariables }> = async (c, next) => {
-    const header = c.req.header('authorization') ?? '';
-    const token = header.startsWith('Bearer ') ? header.slice('Bearer '.length).trim() : '';
+    const token = bearerToken(c.req.header('authorization'));
     if (!token) {
       throw new HttpError(401, 'Sign in to continue.');
     }
@@ -224,10 +223,20 @@ export function createApp(deps: AppServices) {
     await next();
   };
 
+  const allowPublicEventRead: MiddlewareHandler<{ Variables: AppVariables }> = async (c, next) => {
+    if (isPublicEventRead(c.req.method, c.req.url) && !bearerToken(c.req.header('authorization'))) {
+      await next();
+      return;
+    }
+    await requireUser(c, async () => {
+      await requireProfile(c, next);
+    });
+  };
+
   app.use('/me', requireUser);
   app.use('/me/*', requireUser);
-  app.use('/events', requireUser, requireProfile);
-  app.use('/events/*', requireUser, requireProfile);
+  app.use('/events', allowPublicEventRead);
+  app.use('/events/*', allowPublicEventRead);
   app.use('/payments', requireUser, requireProfile);
   app.use('/payments/*', requireUser, requireProfile);
   app.use('/admin', requireUser, requireAdmin);
@@ -283,7 +292,7 @@ export function createApp(deps: AppServices) {
   });
 
   app.get('/events', async (c) => {
-    const events = await listEvents(c.get('user').id);
+    const events = await listEvents(viewer(c)?.id ?? null);
     return c.json({ events });
   });
 
@@ -326,7 +335,7 @@ export function createApp(deps: AppServices) {
   });
 
   app.get('/events/:id', async (c) => {
-    const result = await getEvent(c.req.param('id'), c.get('user'));
+    const result = await getEvent(c.req.param('id'), viewer(c));
     if (!result) {
       throw new HttpError(404, 'That event does not exist.');
     }
@@ -628,6 +637,24 @@ export function createApp(deps: AppServices) {
   }
 
   return app;
+}
+
+function bearerToken(header: string | undefined): string {
+  const value = header ?? '';
+  return value.startsWith('Bearer ') ? value.slice('Bearer '.length).trim() : '';
+}
+
+function isPublicEventRead(method: string, url: string): boolean {
+  if (method !== 'GET') {
+    return false;
+  }
+  const pathname = url.startsWith('http://') || url.startsWith('https://') ? new URL(url).pathname : url.split('?')[0];
+  const parts = pathname.split('/').filter(Boolean);
+  return parts[0] === 'events' && parts.length <= 2;
+}
+
+function viewer(c: { get(key: 'user'): CurrentUser }): CurrentUser | null {
+  return (c.get('user') as CurrentUser | undefined) ?? null;
 }
 
 class HttpError extends Error {

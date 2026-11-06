@@ -93,9 +93,11 @@ function sectionFor(screen: Screen): 'events' | 'users' | 'profile' {
   return 'events';
 }
 
-export function EventsScreen() {
+export function EventsScreen({ initialEventId = null }: { initialEventId?: string | null }) {
   const { token, user, signOut } = useAuth();
-  const [screen, setScreen] = useState<Screen>({ name: 'list' });
+  const [screen, setScreen] = useState<Screen>(
+    initialEventId ? { name: 'detail', id: initialEventId } : { name: 'list' },
+  );
 
   if (!token || !user) {
     return null;
