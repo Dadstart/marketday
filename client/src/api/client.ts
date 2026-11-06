@@ -1,6 +1,16 @@
 import type { SessionUser, StoredSession } from '../auth/types';
+import { resolveApiUrl } from './apiUrl';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8787';
+const API_URL = resolveApiUrl(
+  process.env.EXPO_PUBLIC_API_URL,
+  typeof window === 'undefined'
+    ? undefined
+    : {
+        protocol: window.location.protocol,
+        hostname: window.location.hostname,
+        origin: window.location.origin,
+      },
+);
 
 export class ApiError extends Error {
   constructor(
