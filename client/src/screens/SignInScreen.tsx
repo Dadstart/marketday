@@ -22,6 +22,9 @@ export function SignInScreen() {
         <Text style={styles.title} accessibilityRole="header">
           Sign in
         </Text>
+        <Text style={styles.purpose}>
+          This website is used for Crosswinds Community and Market Day registrations.
+        </Text>
         <Text style={styles.body}>Use your Google or Microsoft account.</Text>
 
         {auth.error ? (
@@ -196,6 +199,12 @@ const styles = StyleSheet.create({
     color: colors.ink,
     fontSize: 40,
     lineHeight: 46,
+    marginBottom: 8,
+  },
+  purpose: {
+    color: colors.ink,
+    fontSize: 16,
+    lineHeight: 24,
     marginBottom: 8,
   },
   body: {

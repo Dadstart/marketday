@@ -5,6 +5,7 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 import { AuthProvider, useAuth } from './src/auth/AuthProvider';
 import { isWebSignInReturn } from './src/auth/webRedirect';
+import { LegalFooter } from './src/LegalFooter';
 import { EventsScreen } from './src/screens/EventsScreen';
 import { SignInScreen } from './src/screens/SignInScreen';
 import { VendorProfileScreen } from './src/screens/VendorProfileScreen';
@@ -39,13 +40,16 @@ function Root() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      {ready ? (
-        screen
-      ) : (
-        <View style={styles.loading}>
-          <ActivityIndicator color={colors.accent} />
-        </View>
-      )}
+      <View style={styles.main}>
+        {ready ? (
+          screen
+        ) : (
+          <View style={styles.loading}>
+            <ActivityIndicator color={colors.accent} />
+          </View>
+        )}
+      </View>
+      <LegalFooter />
     </SafeAreaView>
   );
 }
@@ -54,6 +58,9 @@ const styles = StyleSheet.create({
   safe: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  main: {
+    flex: 1,
   },
   loading: {
     flex: 1,
