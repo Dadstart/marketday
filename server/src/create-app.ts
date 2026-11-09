@@ -38,8 +38,9 @@ export type AppServices = {
   getUserById: (userId: string) => Promise<CurrentUser | null>;
   getVendorProfile: (userId: string) => Promise<VendorProfileDraft | null>;
   saveVendorProfile: (userId: string, input: VendorProfileInput) => Promise<CurrentUser>;
-  listAccounts: () => Promise<AccountSummary[]>;
+  listAccounts: (includeArchived: boolean) => Promise<AccountSummary[]>;
   getAccount: (userId: string) => Promise<AccountDetail | null>;
+  setAccountArchived: (userId: string, archived: boolean) => Promise<AccountDetail | null>;
   saveAdminAccount: (userId: string, profile: VendorProfileInput, adminNotes: string | null) => Promise<void>;
   createAdminAccount: (input: { name: string; email: string }) => Promise<AccountDetail>;
   listEvents: (userId: string | null) => Promise<EventRecord[]>;
@@ -115,6 +116,7 @@ export function createApp(deps: AppServices) {
     saveVendorProfile,
     listAccounts,
     getAccount,
+    setAccountArchived,
     saveAdminAccount,
     createAdminAccount,
     listEvents,
@@ -256,7 +258,7 @@ export function createApp(deps: AppServices) {
   });
 
   app.get('/admin/users', async (c) => {
-    const users = await listAccounts();
+    const users = await listAccounts(c.req.query('includeArchived') === '1');
     return c.json({ users });
   });
 
@@ -264,6 +266,18 @@ export function createApp(deps: AppServices) {
     const input = parseNewAccount(await readJson(c));
     const account = await createAdminAccount(input);
     return c.json({ user: account }, 201);
+  });
+
+  app.put('/admin/users/:id/archived', async (c) => {
+    const body = await readJson(c);
+    if (typeof body.archived !== 'boolean') {
+      throw new HttpError(400, 'Say whether this user is archived.');
+    }
+    const account = await setAccountArchived(c.req.param('id'), body.archived);
+    if (!account) {
+      throw new HttpError(404, 'That account does not exist.');
+    }
+    return c.json({ user: account });
   });
 
   app.get('/admin/users/:id', async (c) => {

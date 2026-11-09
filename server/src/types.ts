@@ -109,6 +109,7 @@ export type AccountSummary = {
   businessName: string | null;
   profileComplete: boolean;
   brandingImage: string | null;
+  archived: boolean;
 };
 
 export type AccountDetail = AccountSummary & {

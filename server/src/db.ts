@@ -408,6 +408,14 @@ export async function saveAdminAccount(
 }
 
 export async function createAdminAccount(input: { name: string; email: string }): Promise<AccountDetail> {
+  const row = await insertAdminAccount(accountDetailColumns, input);
+  return accountDetailFrom(row);
+}
+
+async function insertAdminAccount(
+  columns: string,
+  input: { name: string; email: string },
+): Promise<AccountDetailRow> {
   const inserted = await supabase
     .from('users')
     .insert({
@@ -416,15 +424,19 @@ export async function createAdminAccount(input: { name: string; email: string })
       email: input.email,
       name: input.name,
     })
-    .select(accountDetailColumns)
+    .select(columns)
     .single();
   if (inserted.error?.code === '23505') {
     throw new DatabaseError(409, 'An account with that email already exists.');
   }
-  if (inserted.error || !inserted.data) {
-    throw databaseFailure(inserted.error?.message);
+  if (!inserted.error && inserted.data) {
+    return inserted.data as unknown as AccountDetailRow;
   }
-  return accountDetailFrom(inserted.data as AccountDetailRow);
+  const retry = accountColumnRetry(columns, inserted.error?.message);
+  if (retry) {
+    return insertAdminAccount(retry, input);
+  }
+  throw databaseFailure(inserted.error?.message);
 }
 
 function profileUpdate(input: VendorProfileInput, includeImage: boolean) {
@@ -691,9 +703,9 @@ export async function updateEvent(eventId: string, input: EventInput): Promise<b
 }
 
 const accountSummaryColumns =
-  'id, name, email, business_name, venmo, contact_person, phone, crosswinds_resident, offering, products_and_services, facebook_name, branding_image, profile_completed_at';
+  'id, name, email, business_name, venmo, contact_person, phone, crosswinds_resident, offering, products_and_services, facebook_name, branding_image, profile_completed_at, archived';
 const accountDetailColumns =
-  'id, name, email, provider, provider_subject, business_name, venmo, contact_person, phone, crosswinds_resident, offering, products_and_services, facebook_name, branding_image, admin_notes, profile_completed_at, created_at';
+  'id, name, email, provider, provider_subject, business_name, venmo, contact_person, phone, crosswinds_resident, offering, products_and_services, facebook_name, branding_image, admin_notes, profile_completed_at, created_at, archived';
 
 type AccountSummaryRow = {
   id: string;
@@ -707,8 +719,9 @@ type AccountSummaryRow = {
   offering: string | null;
   products_and_services: string | null;
   facebook_name: string | null;
-  branding_image: string | null;
+  branding_image?: string | null;
   profile_completed_at: string | null;
+  archived?: boolean;
 };
 
 type AccountDetailRow = AccountSummaryRow & {
@@ -725,24 +738,45 @@ type AccountDetailRow = AccountSummaryRow & {
   created_at: string;
 };
 
-export async function listAccounts(): Promise<AccountSummary[]> {
-  const selected = await supabase.from('users').select(accountSummaryColumns).order('name', { ascending: true });
-  if (selected.error?.message.includes('branding_image')) {
-    const fallback = await supabase
-      .from('users')
-      .select(accountSummaryColumns.replace(', branding_image', ''))
-      .order('name', { ascending: true });
-    if (fallback.error) {
-      throw profileFailure(fallback.error.message);
-    }
-    return ((fallback.data ?? []) as unknown as AccountSummaryRow[]).map((row) =>
-      toAccountSummary({ ...row, branding_image: null }),
+export async function listAccounts(includeArchived = false): Promise<AccountSummary[]> {
+  const rows = await selectAccountList(accountSummaryColumns, includeArchived);
+  return rows.map(toAccountSummary);
+}
+
+async function selectAccountList(columns: string, includeArchived: boolean): Promise<AccountSummaryRow[]> {
+  const hideArchived = !includeArchived && columns.split(', ').includes('archived');
+  const selected = await (hideArchived
+    ? supabase.from('users').select(columns).eq('archived', false).order('name', { ascending: true })
+    : supabase.from('users').select(columns).order('name', { ascending: true }));
+  if (!selected.error) {
+    return (selected.data ?? []) as unknown as AccountSummaryRow[];
+  }
+  const retry = accountColumnRetry(columns, selected.error.message);
+  if (retry) {
+    return selectAccountList(retry, columns.includes('archived') && !retry.includes('archived') ? true : includeArchived);
+  }
+  throw profileFailure(selected.error.message);
+}
+
+export async function setAccountArchived(userId: string, archived: boolean): Promise<AccountDetail | null> {
+  const updated = await supabase
+    .from('users')
+    .update({ archived, updated_at: new Date().toISOString() })
+    .eq('id', userId)
+    .select('id');
+  if (updated.error?.message.includes('archived')) {
+    throw new DatabaseError(
+      503,
+      'Run server/supabase/migrations/20261109100000_user_archived.sql in the Supabase SQL editor.',
     );
   }
-  if (selected.error) {
-    throw profileFailure(selected.error.message);
+  if (updated.error) {
+    throw databaseFailure(updated.error.message);
   }
-  return ((selected.data ?? []) as AccountSummaryRow[]).map(toAccountSummary);
+  if ((updated.data ?? []).length === 0) {
+    return null;
+  }
+  return getAccount(userId);
 }
 
 export async function emailAudienceCounts(
@@ -767,11 +801,18 @@ export async function listEmailRecipients(
     return [];
   }
   if (audience === 'vendors') {
-    const { data, error } = await supabase.from('users').select('name, email');
-    if (error) {
-      throw databaseFailure(error.message);
+    const selected = await supabase.from('users').select('name, email').eq('archived', false);
+    if (selected.error?.message.includes('archived')) {
+      const fallback = await supabase.from('users').select('name, email');
+      if (fallback.error) {
+        throw databaseFailure(fallback.error.message);
+      }
+      return uniqueRecipients((fallback.data ?? []) as { name: string | null; email: string | null }[]);
     }
-    return uniqueRecipients((data ?? []) as { name: string | null; email: string | null }[]);
+    if (selected.error) {
+      throw databaseFailure(selected.error.message);
+    }
+    return uniqueRecipients((selected.data ?? []) as { name: string | null; email: string | null }[]);
   }
 
   const query = supabase.from('registrations').select('users(name, email)').eq('event_id', eventId);
@@ -800,28 +841,37 @@ type RegistrationEmailRow = {
 };
 
 export async function getAccount(userId: string): Promise<AccountDetail | null> {
-  const selected = await supabase.from('users').select(accountDetailColumns).eq('id', userId).maybeSingle();
-  if (selected.error?.message.includes('branding_image')) {
-    const fallback = await supabase
-      .from('users')
-      .select(accountDetailColumns.replace(', branding_image', ''))
-      .eq('id', userId)
-      .maybeSingle();
-    if (fallback.error) {
-      throw profileFailure(fallback.error.message);
-    }
-    if (!fallback.data) {
-      return null;
-    }
-    return accountDetailFrom({ ...(fallback.data as unknown as AccountDetailRow), branding_image: null });
+  const row = await selectAccountRow(accountDetailColumns, userId);
+  return row ? accountDetailFrom(row) : null;
+}
+
+async function selectAccountRow(columns: string, userId: string): Promise<AccountDetailRow | null> {
+  const selected = await supabase.from('users').select(columns).eq('id', userId).maybeSingle();
+  if (!selected.error) {
+    return (selected.data as unknown as AccountDetailRow | null) ?? null;
   }
-  if (selected.error) {
-    throw profileFailure(selected.error.message);
+  const retry = accountColumnRetry(columns, selected.error.message);
+  if (retry) {
+    return selectAccountRow(retry, userId);
   }
-  if (!selected.data) {
-    return null;
+  throw profileFailure(selected.error.message);
+}
+
+function accountColumnRetry(columns: string, message: string | undefined): string | null {
+  if (message?.includes('archived') && columns.split(', ').includes('archived')) {
+    return withoutColumn(columns, 'archived');
   }
-  return accountDetailFrom(selected.data as AccountDetailRow);
+  if (message?.includes('branding_image') && columns.split(', ').includes('branding_image')) {
+    return withoutColumn(columns, 'branding_image');
+  }
+  return null;
+}
+
+function withoutColumn(columns: string, column: string): string {
+  return columns
+    .split(', ')
+    .filter((name) => name !== column)
+    .join(', ');
 }
 
 function accountDetailFrom(row: AccountDetailRow): AccountDetail {
@@ -848,6 +898,7 @@ function toAccountSummary(row: AccountSummaryRow): AccountSummary {
     businessName: blankToNull(row.business_name),
     profileComplete: isProfileComplete(row),
     brandingImage: storedBrandingImage(row.branding_image),
+    archived: row.archived === true,
   };
 }
 

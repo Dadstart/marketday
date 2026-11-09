@@ -58,6 +58,7 @@ export type AccountSummary = {
   businessName: string | null;
   profileComplete: boolean;
   brandingImage: string | null;
+  archived: boolean;
 };
 
 export type AccountDetail = AccountSummary & {
@@ -147,8 +148,20 @@ export async function saveVendorProfile(
   return { user: normalizeUser(body.user) };
 }
 
-export function fetchAccounts(token: string): Promise<{ users: AccountSummary[] }> {
-  return request('/admin/users', token);
+export function fetchAccounts(token: string, includeArchived = false): Promise<{ users: AccountSummary[] }> {
+  const path = includeArchived ? '/admin/users?includeArchived=1' : '/admin/users';
+  return request(path, token);
+}
+
+export function setAccountArchived(
+  token: string,
+  userId: string,
+  archived: boolean,
+): Promise<{ user: AccountDetail }> {
+  return request(`/admin/users/${userId}/archived`, token, {
+    method: 'PUT',
+    body: JSON.stringify({ archived }),
+  });
 }
 
 export function createAccount(

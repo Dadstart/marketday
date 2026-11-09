@@ -1028,6 +1028,9 @@ function EmailVendors({ token, eventId }: { token: string; eventId: string }) {
               </Pressable>
             );
           })}
+          {audience === 'vendors' ? (
+            <Text style={styles.muted}>Archived users are not included.</Text>
+          ) : null}
           {audience === 'addresses' ? (
             <Field
               label="Email addresses"
