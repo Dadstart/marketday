@@ -5,6 +5,7 @@ import {
   createAccount,
   fetchAccount,
   fetchAccounts,
+  setAccountArchived,
   updateAccount,
   type AccountDetail,
   type AccountSummary,
@@ -42,18 +43,28 @@ export function AccountList({
   onCreate: () => void;
 }) {
   const [users, setUsers] = useState<AccountSummary[] | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(() => {
-    setError(null);
-    fetchAccounts(token)
-      .then((body) => setUsers(body.users))
-      .catch((reason: unknown) => setError(messageFrom(reason)));
-  }, [token]);
-
   useEffect(() => {
-    load();
-  }, [load]);
+    let active = true;
+    setError(null);
+    setUsers(null);
+    fetchAccounts(token, showArchived)
+      .then((body) => {
+        if (active) {
+          setUsers(body.users);
+        }
+      })
+      .catch((reason: unknown) => {
+        if (active) {
+          setError(messageFrom(reason));
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [showArchived, token]);
 
   return (
     <ScrollView style={styles.flex} contentContainerStyle={styles.content}>
@@ -66,9 +77,19 @@ export function AccountList({
             <Text style={styles.saveLabel}>Create user</Text>
           </Pressable>
         </View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ selected: showArchived }}
+          onPress={() => setShowArchived((shown) => !shown)}
+          style={pointer}
+        >
+          <Text style={styles.back}>{showArchived ? 'Hide archived' : 'Show archived'}</Text>
+        </Pressable>
         {error ? <Text style={styles.error}>{error}</Text> : null}
         {users == null && !error ? <ActivityIndicator color={colors.accent} /> : null}
-        {users?.length === 0 ? <Text style={styles.muted}>No accounts yet.</Text> : null}
+        {users?.length === 0 ? (
+          <Text style={styles.muted}>{showArchived ? 'No accounts yet.' : 'No users to show.'}</Text>
+        ) : null}
         {users?.map((account) => (
           <Pressable
             key={account.id}
@@ -80,6 +101,7 @@ export function AccountList({
               <Text style={styles.cardTitle}>{account.name}</Text>
               <Text style={styles.muted}>{account.email}</Text>
               <Text style={styles.muted}>{account.businessName ?? 'No business name yet'}</Text>
+              {account.archived ? <Text style={styles.muted}>Archived</Text> : null}
               <Text style={styles.link}>View details</Text>
             </View>
             {account.brandingImage ? (
@@ -109,13 +131,30 @@ export function AccountDetailView({
   const [account, setAccount] = useState<AccountDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const [confirmingArchive, setConfirmingArchive] = useState(false);
+  const [archiveBusy, setArchiveBusy] = useState(false);
 
   const load = useCallback(() => {
     setError(null);
+    setConfirmingArchive(false);
     return fetchAccount(token, userId)
       .then((body) => setAccount(body.user))
       .catch((reason: unknown) => setError(messageFrom(reason)));
   }, [token, userId]);
+
+  async function changeArchived(archived: boolean) {
+    setArchiveBusy(true);
+    setError(null);
+    try {
+      const result = await setAccountArchived(token, userId, archived);
+      setAccount(result.user);
+      setConfirmingArchive(false);
+    } catch (reason) {
+      setError(reason instanceof Error && reason.message ? reason.message : 'The account could not be updated.');
+    } finally {
+      setArchiveBusy(false);
+    }
+  }
 
   useEffect(() => {
     void load();
@@ -141,6 +180,53 @@ export function AccountDetailView({
             <Pressable accessibilityRole="button" onPress={() => setEditing(true)} style={pointer}>
               <Text style={styles.back}>Edit details</Text>
             </Pressable>
+            {account.archived ? (
+              <>
+                <Text style={styles.muted}>
+                  This user is archived, so they stay off the users list and out of emails to all vendors.
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={archiveBusy}
+                  onPress={() => {
+                    void changeArchived(false);
+                  }}
+                  style={pointer}
+                >
+                  <Text style={styles.back}>{archiveBusy ? 'Restoring…' : 'Restore user'}</Text>
+                </Pressable>
+              </>
+            ) : confirmingArchive ? (
+              <>
+                <Text style={styles.muted}>
+                  Archive this user? They will be hidden from the users list and left out of emails to all vendors.
+                </Text>
+                <View style={styles.choiceRow}>
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={archiveBusy}
+                    onPress={() => {
+                      void changeArchived(true);
+                    }}
+                    style={({ pressed }) => [styles.save, archiveBusy && styles.disabled, pressed && styles.pressed, pointer]}
+                  >
+                    <Text style={styles.saveLabel}>{archiveBusy ? 'Archiving…' : 'Archive user'}</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={archiveBusy}
+                    onPress={() => setConfirmingArchive(false)}
+                    style={pointer}
+                  >
+                    <Text style={styles.back}>Cancel</Text>
+                  </Pressable>
+                </View>
+              </>
+            ) : (
+              <Pressable accessibilityRole="button" onPress={() => setConfirmingArchive(true)} style={pointer}>
+                <Text style={styles.back}>Archive user</Text>
+              </Pressable>
+            )}
             {account.brandingImage ? (
               <Image
                 accessibilityLabel="Branding image"

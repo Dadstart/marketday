@@ -67,6 +67,7 @@ function services(overrides: Partial<AppServices>): AppServices {
     saveVendorProfile: missing('saveVendorProfile'),
     listAccounts: missing('listAccounts'),
     getAccount: missing('getAccount'),
+    setAccountArchived: missing('setAccountArchived'),
     saveAdminAccount: missing('saveAdminAccount'),
     createAdminAccount: missing('createAdminAccount'),
     listEvents: missing('listEvents'),
@@ -179,6 +180,7 @@ describe('access', () => {
           businessName: null,
           profileComplete: false,
           brandingImage: null,
+          archived: false,
           provider: 'admin',
           venmo: null,
           contactPerson: null,
@@ -206,6 +208,72 @@ describe('access', () => {
       body: { name: 'Ada', email: 'ada@example.com' },
     });
     assert.equal(vendor.status, 403);
+  });
+
+  test('an administrator can archive a user, and the list hides archived accounts unless asked', async () => {
+    let includeArchived: boolean | null = null;
+    let archived: boolean | null = null;
+    const account = {
+      id: 'user-2',
+      name: 'Ada',
+      email: 'ada@example.com',
+      businessName: null,
+      profileComplete: false,
+      brandingImage: null,
+      archived: false,
+      provider: 'admin' as const,
+      venmo: null,
+      contactPerson: null,
+      phone: null,
+      crosswindsResident: null,
+      offering: null,
+      productsAndServices: null,
+      facebookName: null,
+      adminNotes: null,
+      createdAt: future,
+    };
+    const app = appFor(admin, {
+      listAccounts: async (included) => {
+        includeArchived = included;
+        return [];
+      },
+      setAccountArchived: async (_userId, next) => {
+        archived = next;
+        return { ...account, archived: next };
+      },
+    });
+
+    const listed = await call(app, 'GET', '/admin/users');
+    assert.equal(listed.status, 200);
+    assert.equal(includeArchived, false);
+
+    const withArchived = await call(app, 'GET', '/admin/users?includeArchived=1');
+    assert.equal(withArchived.status, 200);
+    assert.equal(includeArchived, true);
+
+    const updated = await call(app, 'PUT', '/admin/users/user-2/archived', { body: { archived: true } });
+    assert.equal(updated.status, 200);
+    assert.equal(archived, true);
+    assert.equal((updated.body as { user?: { archived?: boolean } } | null)?.user?.archived, true);
+
+    const invalid = await call(app, 'PUT', '/admin/users/user-2/archived', { body: { archived: 'yes' } });
+    assert.equal(invalid.status, 400);
+
+    const vendor = await call(
+      appFor(person(), { setAccountArchived: async () => account }),
+      'PUT',
+      '/admin/users/user-2/archived',
+      { body: { archived: true } },
+    );
+    assert.equal(vendor.status, 403);
+
+    const missingUser = await call(
+      appFor(admin, { setAccountArchived: async () => null }),
+      'PUT',
+      '/admin/users/missing/archived',
+      { body: { archived: false } },
+    );
+    assert.equal(missingUser.status, 404);
   });
 
   test('anyone can browse events, and registering still requires a sign-in', async () => {
