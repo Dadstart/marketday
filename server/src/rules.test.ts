@@ -62,6 +62,9 @@ describe('vendor profiles', () => {
     assert.equal(parsed.facebookName, null);
     assert.equal(parsed.brandingImage, null);
     assert.equal(parsed.crosswindsResident, true);
+    assert.equal(parsed.emailOptOut, false);
+    assert.equal(parseVendorProfile({ ...profile, emailOptOut: true }).emailOptOut, true);
+    assert.throws(() => parseVendorProfile({ ...profile, emailOptOut: 'yes' }), /market emails/);
   });
 
   test('rejects a short phone, an unknown offering, and a missing residency answer', () => {

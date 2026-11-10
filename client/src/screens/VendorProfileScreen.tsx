@@ -33,6 +33,7 @@ export function VendorProfileScreen({
   const [productsAndServices, setProductsAndServices] = useState('');
   const [facebookName, setFacebookName] = useState('');
   const [brandingImage, setBrandingImage] = useState<string | null>(null);
+  const [emailOptOut, setEmailOptOut] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -58,6 +59,7 @@ export function VendorProfileScreen({
         setProductsAndServices(profile.productsAndServices);
         setFacebookName(profile.facebookName);
         setBrandingImage(profile.brandingImage);
+        setEmailOptOut(profile.emailOptOut);
       })
       .catch((reason: unknown) => {
         if (active) {
@@ -101,6 +103,7 @@ export function VendorProfileScreen({
         productsAndServices: productsAndServices.trim(),
         facebookName: facebookName.trim() || null,
         brandingImage,
+        emailOptOut,
       });
       updateUser(result.user);
       if (onBack) {
@@ -197,6 +200,15 @@ export function VendorProfileScreen({
           onChangeText={setFacebookName}
           placeholder="Optional"
         />
+
+        <Text style={styles.label}>Market emails</Text>
+        <Text style={styles.help}>
+          Organizers send these about Community Day. You can turn them off and still use the site.
+        </Text>
+        <View style={styles.choiceRow}>
+          <Choice label="Send them" selected={!emailOptOut} onPress={() => setEmailOptOut(false)} />
+          <Choice label="Don't email me" selected={emailOptOut} onPress={() => setEmailOptOut(true)} />
+        </View>
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
         <Pressable

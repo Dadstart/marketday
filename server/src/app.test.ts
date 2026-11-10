@@ -181,6 +181,7 @@ describe('access', () => {
           profileComplete: false,
           brandingImage: null,
           archived: false,
+          emailOptOut: false,
           provider: 'admin',
           venmo: null,
           contactPerson: null,
@@ -221,6 +222,7 @@ describe('access', () => {
       profileComplete: false,
       brandingImage: null,
       archived: false,
+      emailOptOut: false,
       provider: 'admin' as const,
       venmo: null,
       contactPerson: null,
@@ -377,6 +379,30 @@ describe('events and registration', () => {
     });
     assert.equal(rejected.status, 400);
     assert.equal(saved, png);
+  });
+
+  test('saves an email opt-out with the profile', async () => {
+    const profile = {
+      venmo: '@market',
+      contactPerson: 'Ada Lovelace',
+      businessName: 'Analytical Engines',
+      phone: '(512) 555-1212',
+      crosswindsResident: true,
+      offering: 'retail',
+      productsAndServices: 'Prints',
+      facebookName: null,
+      brandingImage: null,
+      emailOptOut: true,
+    };
+    let optedOut: boolean | null = null;
+    const app = appFor(person(), {
+      saveVendorProfile: async (_userId, input) => {
+        optedOut = input.emailOptOut;
+        return person();
+      },
+    });
+    assert.equal((await call(app, 'PUT', '/me/profile', { body: profile })).status, 200);
+    assert.equal(optedOut, true);
   });
 });
 
