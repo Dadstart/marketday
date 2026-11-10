@@ -156,6 +156,24 @@ export function fetchAccounts(token: string, includeArchived = false): Promise<{
   return request(path, token);
 }
 
+export function setMyEmailOptOut(token: string, emailOptOut: boolean): Promise<{ emailOptOut: boolean }> {
+  return request('/me/email-opt-out', token, {
+    method: 'PUT',
+    body: JSON.stringify({ emailOptOut }),
+  });
+}
+
+export function setAccountEmailOptOut(
+  token: string,
+  userId: string,
+  emailOptOut: boolean,
+): Promise<{ user: AccountDetail }> {
+  return request(`/admin/users/${userId}/email-opt-out`, token, {
+    method: 'PUT',
+    body: JSON.stringify({ emailOptOut }),
+  });
+}
+
 export function setAccountArchived(
   token: string,
   userId: string,

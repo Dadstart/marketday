@@ -6,6 +6,7 @@ import {
   fetchAccount,
   fetchAccounts,
   setAccountArchived,
+  setAccountEmailOptOut,
   updateAccount,
   type AccountDetail,
   type AccountSummary,
@@ -134,6 +135,7 @@ export function AccountDetailView({
   const [editing, setEditing] = useState(false);
   const [confirmingArchive, setConfirmingArchive] = useState(false);
   const [archiveBusy, setArchiveBusy] = useState(false);
+  const [emailBusy, setEmailBusy] = useState(false);
 
   const load = useCallback(() => {
     setError(null);
@@ -142,6 +144,22 @@ export function AccountDetailView({
       .then((body) => setAccount(body.user))
       .catch((reason: unknown) => setError(messageFrom(reason)));
   }, [token, userId]);
+
+  async function changeEmailOptOut(emailOptOut: boolean) {
+    if (!account || emailBusy || emailOptOut === account.emailOptOut) {
+      return;
+    }
+    setEmailBusy(true);
+    setError(null);
+    try {
+      const result = await setAccountEmailOptOut(token, userId, emailOptOut);
+      setAccount(result.user);
+    } catch (reason) {
+      setError(reason instanceof Error && reason.message ? reason.message : 'The email choice could not be saved.');
+    } finally {
+      setEmailBusy(false);
+    }
+  }
 
   async function changeArchived(archived: boolean) {
     setArchiveBusy(true);
@@ -175,6 +193,23 @@ export function AccountDetailView({
               {account.name}
             </Text>
             <Text style={styles.muted}>{account.email}</Text>
+            <Text style={styles.detailLabel}>Market emails</Text>
+            <View style={styles.choiceRow}>
+              <Choice
+                label="Send them"
+                selected={!account.emailOptOut}
+                onPress={() => {
+                  void changeEmailOptOut(false);
+                }}
+              />
+              <Choice
+                label="Don't email me"
+                selected={account.emailOptOut}
+                onPress={() => {
+                  void changeEmailOptOut(true);
+                }}
+              />
+            </View>
             <Text style={styles.muted}>
               {account.profileComplete ? 'Profile complete' : 'Profile not finished'} · {accountOrigin(account.provider)}
             </Text>
@@ -249,7 +284,6 @@ export function AccountDetailView({
             <Detail label="What they offer" value={offeringLabel(account.offering)} />
             <Detail label="Products and services" value={account.productsAndServices} />
             <Detail label="Facebook group or page" value={account.facebookName} />
-            <Detail label="Market emails" value={account.emailOptOut ? 'Opted out' : 'Will receive emails'} />
             <Detail label="Notes" value={account.adminNotes} />
           </>
         ) : null}
@@ -334,6 +368,11 @@ function AccountEditor({
         Edit {account.name}
       </Text>
       <Text style={styles.muted}>{account.email}</Text>
+      <Text style={styles.detailLabel}>Market emails</Text>
+      <View style={styles.choiceRow}>
+        <Choice label="Send them" selected={!emailOptOut} onPress={() => setEmailOptOut(false)} />
+        <Choice label="Don't email me" selected={emailOptOut} onPress={() => setEmailOptOut(true)} />
+      </View>
       <Text style={styles.muted}>Name and email come from their Google or Microsoft account.</Text>
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <Field label="Venmo account name or phone number" value={venmo} onChangeText={setVenmo} />
@@ -367,11 +406,6 @@ function AccountEditor({
         onChangeText={setFacebookName}
         placeholder="Optional"
       />
-      <Text style={styles.detailLabel}>Market emails</Text>
-      <View style={styles.choiceRow}>
-        <Choice label="Send them" selected={!emailOptOut} onPress={() => setEmailOptOut(false)} />
-        <Choice label="Don't email me" selected={emailOptOut} onPress={() => setEmailOptOut(true)} />
-      </View>
       <Field
         label="Notes"
         value={adminNotes}

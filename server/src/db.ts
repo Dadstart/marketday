@@ -770,6 +770,24 @@ async function selectAccountList(columns: string, includeArchived: boolean): Pro
   throw profileFailure(selected.error.message);
 }
 
+export async function setEmailOptOut(userId: string, emailOptOut: boolean): Promise<boolean> {
+  const updated = await supabase
+    .from('users')
+    .update({ email_opt_out: emailOptOut, updated_at: new Date().toISOString() })
+    .eq('id', userId)
+    .select('id');
+  if (updated.error?.message.includes('email_opt_out')) {
+    throw new DatabaseError(
+      503,
+      'Run server/supabase/migrations/20261110150000_email_opt_out.sql in the Supabase SQL editor.',
+    );
+  }
+  if (updated.error) {
+    throw databaseFailure(updated.error.message);
+  }
+  return (updated.data ?? []).length > 0;
+}
+
 export async function setAccountArchived(userId: string, archived: boolean): Promise<AccountDetail | null> {
   const updated = await supabase
     .from('users')
