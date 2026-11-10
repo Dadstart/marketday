@@ -41,6 +41,7 @@ export type AppServices = {
   listAccounts: (includeArchived: boolean) => Promise<AccountSummary[]>;
   getAccount: (userId: string) => Promise<AccountDetail | null>;
   setAccountArchived: (userId: string, archived: boolean) => Promise<AccountDetail | null>;
+  setEmailOptOut: (userId: string, emailOptOut: boolean) => Promise<boolean>;
   saveAdminAccount: (userId: string, profile: VendorProfileInput, adminNotes: string | null) => Promise<void>;
   createAdminAccount: (input: { name: string; email: string }) => Promise<AccountDetail>;
   listEvents: (userId: string | null) => Promise<EventRecord[]>;
@@ -117,6 +118,7 @@ export function createApp(deps: AppServices) {
     listAccounts,
     getAccount,
     setAccountArchived,
+    setEmailOptOut,
     saveAdminAccount,
     createAdminAccount,
     listEvents,
@@ -251,6 +253,15 @@ export function createApp(deps: AppServices) {
     return c.json({ profile });
   });
 
+  app.put('/me/email-opt-out', async (c) => {
+    const emailOptOut = parseEmailOptOutBody(await readJson(c));
+    const updated = await setEmailOptOut(c.get('user').id, emailOptOut);
+    if (!updated) {
+      throw new HttpError(404, 'That account does not exist.');
+    }
+    return c.json({ emailOptOut });
+  });
+
   app.put('/me/profile', async (c) => {
     const profile = parseVendorProfile(await readJson(c));
     const user = await saveVendorProfile(c.get('user').id, profile);
@@ -266,6 +277,20 @@ export function createApp(deps: AppServices) {
     const input = parseNewAccount(await readJson(c));
     const account = await createAdminAccount(input);
     return c.json({ user: account }, 201);
+  });
+
+  app.put('/admin/users/:id/email-opt-out', async (c) => {
+    const emailOptOut = parseEmailOptOutBody(await readJson(c));
+    const userId = c.req.param('id');
+    const updated = await setEmailOptOut(userId, emailOptOut);
+    if (!updated) {
+      throw new HttpError(404, 'That account does not exist.');
+    }
+    const account = await getAccount(userId);
+    if (!account) {
+      throw new HttpError(404, 'That account does not exist.');
+    }
+    return c.json({ user: account });
   });
 
   app.put('/admin/users/:id/archived', async (c) => {
@@ -719,6 +744,13 @@ async function readJson(c: { req: { json: () => Promise<unknown> } }): Promise<R
     }
     throw new HttpError(400, 'Expected a JSON object.');
   }
+}
+
+function parseEmailOptOutBody(body: Record<string, unknown>): boolean {
+  if (typeof body.emailOptOut !== 'boolean') {
+    throw new HttpError(400, 'Say whether you want market emails.');
+  }
+  return body.emailOptOut;
 }
 
 function eventHasStarted(startsAt: string): boolean {

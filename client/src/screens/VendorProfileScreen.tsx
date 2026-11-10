@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { fetchVendorProfile, saveVendorProfile, type VendorProfileInput } from '../api/client';
+import { fetchVendorProfile, saveVendorProfile, setMyEmailOptOut, type VendorProfileInput } from '../api/client';
 import { useAuth } from '../auth/AuthProvider';
 import { Logo } from '../Logo';
 import { BrandingImageField } from './BrandingImageField';
@@ -34,6 +34,7 @@ export function VendorProfileScreen({
   const [facebookName, setFacebookName] = useState('');
   const [brandingImage, setBrandingImage] = useState<string | null>(null);
   const [emailOptOut, setEmailOptOut] = useState(false);
+  const [emailBusy, setEmailBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -75,6 +76,24 @@ export function VendorProfileScreen({
       active = false;
     };
   }, [token]);
+
+  async function chooseEmail(optOut: boolean) {
+    if (!token || emailBusy || optOut === emailOptOut) {
+      return;
+    }
+    const previous = emailOptOut;
+    setEmailOptOut(optOut);
+    setError(null);
+    setEmailBusy(true);
+    try {
+      await setMyEmailOptOut(token, optOut);
+    } catch (reason) {
+      setEmailOptOut(previous);
+      setError(reason instanceof Error && reason.message ? reason.message : 'The email choice could not be saved.');
+    } finally {
+      setEmailBusy(false);
+    }
+  }
 
   async function submit() {
     if (!token) {
@@ -142,6 +161,26 @@ export function VendorProfileScreen({
         </Text>
         <ReadOnly label="Name" value={user?.name || '—'} />
         <ReadOnly label="Email" value={user?.email || '—'} />
+        <Text style={styles.label}>Market emails</Text>
+        <Text style={styles.help}>
+          Organizers send these about Community Day. You can turn them off and still use the site.
+        </Text>
+        <View style={styles.choiceRow}>
+          <Choice
+            label="Send them"
+            selected={!emailOptOut}
+            onPress={() => {
+              void chooseEmail(false);
+            }}
+          />
+          <Choice
+            label="Don't email me"
+            selected={emailOptOut}
+            onPress={() => {
+              void chooseEmail(true);
+            }}
+          />
+        </View>
         {error ? <Text style={styles.error}>{error}</Text> : null}
         {saved ? <Text style={styles.saved}>Profile saved.</Text> : null}
         {loading ? <ActivityIndicator color={colors.accent} /> : null}
@@ -200,15 +239,6 @@ export function VendorProfileScreen({
           onChangeText={setFacebookName}
           placeholder="Optional"
         />
-
-        <Text style={styles.label}>Market emails</Text>
-        <Text style={styles.help}>
-          Organizers send these about Community Day. You can turn them off and still use the site.
-        </Text>
-        <View style={styles.choiceRow}>
-          <Choice label="Send them" selected={!emailOptOut} onPress={() => setEmailOptOut(false)} />
-          <Choice label="Don't email me" selected={emailOptOut} onPress={() => setEmailOptOut(true)} />
-        </View>
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
         <Pressable

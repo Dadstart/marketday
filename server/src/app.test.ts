@@ -68,6 +68,7 @@ function services(overrides: Partial<AppServices>): AppServices {
     listAccounts: missing('listAccounts'),
     getAccount: missing('getAccount'),
     setAccountArchived: missing('setAccountArchived'),
+    setEmailOptOut: missing('setEmailOptOut'),
     saveAdminAccount: missing('saveAdminAccount'),
     createAdminAccount: missing('createAdminAccount'),
     listEvents: missing('listEvents'),
@@ -403,6 +404,21 @@ describe('events and registration', () => {
     });
     assert.equal((await call(app, 'PUT', '/me/profile', { body: profile })).status, 200);
     assert.equal(optedOut, true);
+  });
+
+  test('a person can opt out of market emails without saving the rest of the profile', async () => {
+    let optedOut: boolean | null = null;
+    const app = appFor(person(), {
+      setEmailOptOut: async (_userId, next) => {
+        optedOut = next;
+        return true;
+      },
+    });
+    const saved = await call(app, 'PUT', '/me/email-opt-out', { body: { emailOptOut: true } });
+    assert.equal(saved.status, 200);
+    assert.equal(optedOut, true);
+    const invalid = await call(app, 'PUT', '/me/email-opt-out', { body: { emailOptOut: 'yes' } });
+    assert.equal(invalid.status, 400);
   });
 });
 
