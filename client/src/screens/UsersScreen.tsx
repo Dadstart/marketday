@@ -102,6 +102,7 @@ export function AccountList({
               <Text style={styles.muted}>{account.email}</Text>
               <Text style={styles.muted}>{account.businessName ?? 'No business name yet'}</Text>
               {account.archived ? <Text style={styles.muted}>Archived</Text> : null}
+              {account.emailOptOut ? <Text style={styles.muted}>Opted out of email</Text> : null}
               <Text style={styles.link}>View details</Text>
             </View>
             {account.brandingImage ? (
@@ -248,6 +249,7 @@ export function AccountDetailView({
             <Detail label="What they offer" value={offeringLabel(account.offering)} />
             <Detail label="Products and services" value={account.productsAndServices} />
             <Detail label="Facebook group or page" value={account.facebookName} />
+            <Detail label="Market emails" value={account.emailOptOut ? 'Opted out' : 'Will receive emails'} />
             <Detail label="Notes" value={account.adminNotes} />
           </>
         ) : null}
@@ -289,6 +291,7 @@ function AccountEditor({
   const [facebookName, setFacebookName] = useState(account.facebookName ?? '');
   const [brandingImage, setBrandingImage] = useState<string | null>(account.brandingImage);
   const [adminNotes, setAdminNotes] = useState(account.adminNotes ?? '');
+  const [emailOptOut, setEmailOptOut] = useState(account.emailOptOut);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -314,6 +317,7 @@ function AccountEditor({
         productsAndServices: productsAndServices.trim(),
         facebookName: facebookName.trim() || null,
         brandingImage,
+        emailOptOut,
         adminNotes: adminNotes.trim() || null,
       });
       onSaved(result.user);
@@ -363,6 +367,11 @@ function AccountEditor({
         onChangeText={setFacebookName}
         placeholder="Optional"
       />
+      <Text style={styles.detailLabel}>Market emails</Text>
+      <View style={styles.choiceRow}>
+        <Choice label="Send them" selected={!emailOptOut} onPress={() => setEmailOptOut(false)} />
+        <Choice label="Don't email me" selected={emailOptOut} onPress={() => setEmailOptOut(true)} />
+      </View>
       <Field
         label="Notes"
         value={adminNotes}

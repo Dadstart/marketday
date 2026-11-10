@@ -59,6 +59,7 @@ export type AccountSummary = {
   profileComplete: boolean;
   brandingImage: string | null;
   archived: boolean;
+  emailOptOut: boolean;
 };
 
 export type AccountDetail = AccountSummary & {
@@ -99,6 +100,7 @@ export type VendorProfileInput = {
   productsAndServices: string;
   facebookName: string | null;
   brandingImage: string | null;
+  emailOptOut: boolean;
 };
 
 export type VendorProfileDraft = {
@@ -111,6 +113,7 @@ export type VendorProfileDraft = {
   productsAndServices: string;
   facebookName: string;
   brandingImage: string | null;
+  emailOptOut: boolean;
 };
 
 export async function createApiSession(input: {

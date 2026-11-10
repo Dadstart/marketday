@@ -439,7 +439,7 @@ async function insertAdminAccount(
   throw databaseFailure(inserted.error?.message);
 }
 
-function profileUpdate(input: VendorProfileInput, includeImage: boolean) {
+function profileUpdate(input: VendorProfileInput, options: { image: boolean; optOut: boolean }) {
   return {
     venmo: input.venmo,
     contact_person: input.contactPerson,
@@ -449,40 +449,50 @@ function profileUpdate(input: VendorProfileInput, includeImage: boolean) {
     offering: input.offering,
     products_and_services: input.productsAndServices,
     facebook_name: input.facebookName,
-    ...(includeImage ? { branding_image: input.brandingImage } : {}),
+    ...(options.image ? { branding_image: input.brandingImage } : {}),
+    ...(options.optOut ? { email_opt_out: input.emailOptOut } : {}),
     profile_completed_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
 }
 
 async function updateProfile(userId: string, input: VendorProfileInput, adminNotes?: string | null): Promise<UserRow> {
+  return writeProfile(userId, input, adminNotes, { image: true, optOut: true });
+}
+
+async function writeProfile(
+  userId: string,
+  input: VendorProfileInput,
+  adminNotes: string | null | undefined,
+  options: { image: boolean; optOut: boolean },
+): Promise<UserRow> {
   const extra = adminNotes === undefined ? {} : { admin_notes: adminNotes };
   const saved = await supabase
     .from('users')
-    .update({ ...profileUpdate(input, true), ...extra })
+    .update({ ...profileUpdate(input, options), ...extra })
     .eq('id', userId)
     .select(userColumns)
     .single();
   if (!saved.error && saved.data) {
     return saved.data as UserRow;
   }
-  if (saved.error?.message.includes('branding_image') && !input.brandingImage) {
-    const retry = await supabase
-      .from('users')
-      .update({ ...profileUpdate(input, false), ...extra })
-      .eq('id', userId)
-      .select(userColumns)
-      .single();
-    if (!retry.error && retry.data) {
-      return retry.data as UserRow;
+  if (options.optOut && saved.error?.message.includes('email_opt_out')) {
+    if (input.emailOptOut) {
+      throw new DatabaseError(
+        503,
+        'Run server/supabase/migrations/20261110150000_email_opt_out.sql in the Supabase SQL editor.',
+      );
     }
-    throw profileFailure(retry.error?.message);
+    return writeProfile(userId, input, adminNotes, { ...options, optOut: false });
+  }
+  if (options.image && saved.error?.message.includes('branding_image') && !input.brandingImage) {
+    return writeProfile(userId, input, adminNotes, { ...options, image: false });
   }
   throw profileFailure(saved.error?.message);
 }
 
 const profileColumns =
-  'venmo, contact_person, business_name, phone, crosswinds_resident, offering, products_and_services, facebook_name, branding_image, profile_completed_at';
+  'venmo, contact_person, business_name, phone, crosswinds_resident, offering, products_and_services, facebook_name, branding_image, email_opt_out, profile_completed_at';
 
 type ProfileRow = {
   venmo: string | null;
@@ -493,7 +503,8 @@ type ProfileRow = {
   offering: string | null;
   products_and_services: string | null;
   facebook_name: string | null;
-  branding_image: string | null;
+  branding_image?: string | null;
+  email_opt_out?: boolean;
   profile_completed_at: string | null;
 };
 
@@ -514,22 +525,22 @@ function storedBrandingImage(value: string | null | undefined): string | null {
 const offerings = new Set(['retail', 'food', 'service', 'group', 'entertainment']);
 
 export async function getVendorProfile(userId: string): Promise<VendorProfileDraft | null> {
-  const selected = await supabase.from('users').select(profileColumns).eq('id', userId).maybeSingle();
-  if (selected.error?.message.includes('branding_image')) {
-    const fallback = await supabase
-      .from('users')
-      .select(profileColumns.replace(', branding_image', ''))
-      .eq('id', userId)
-      .maybeSingle();
-    if (fallback.error) {
-      throw profileFailure(fallback.error.message);
-    }
-    return fallback.data ? toProfileDraft({ ...(fallback.data as unknown as ProfileRow), branding_image: null }) : null;
+  const row = await selectProfile(profileColumns, userId);
+  return row ? toProfileDraft(row) : null;
+}
+
+async function selectProfile(columns: string, userId: string): Promise<ProfileRow | null> {
+  const selected = await supabase.from('users').select(columns).eq('id', userId).maybeSingle();
+  if (!selected.error) {
+    return (selected.data as unknown as ProfileRow | null) ?? null;
   }
-  if (selected.error) {
-    throw profileFailure(selected.error.message);
+  if (selected.error.message.includes('email_opt_out') && columns.split(', ').includes('email_opt_out')) {
+    return selectProfile(withoutColumn(columns, 'email_opt_out'), userId);
   }
-  return selected.data ? toProfileDraft(selected.data as ProfileRow) : null;
+  if (selected.error.message.includes('branding_image') && columns.split(', ').includes('branding_image')) {
+    return selectProfile(withoutColumn(columns, 'branding_image'), userId);
+  }
+  throw profileFailure(selected.error.message);
 }
 
 export async function listEvents(userId: string | null): Promise<EventRecord[]> {
@@ -703,9 +714,9 @@ export async function updateEvent(eventId: string, input: EventInput): Promise<b
 }
 
 const accountSummaryColumns =
-  'id, name, email, business_name, venmo, contact_person, phone, crosswinds_resident, offering, products_and_services, facebook_name, branding_image, profile_completed_at, archived';
+  'id, name, email, business_name, venmo, contact_person, phone, crosswinds_resident, offering, products_and_services, facebook_name, branding_image, profile_completed_at, archived, email_opt_out';
 const accountDetailColumns =
-  'id, name, email, provider, provider_subject, business_name, venmo, contact_person, phone, crosswinds_resident, offering, products_and_services, facebook_name, branding_image, admin_notes, profile_completed_at, created_at, archived';
+  'id, name, email, provider, provider_subject, business_name, venmo, contact_person, phone, crosswinds_resident, offering, products_and_services, facebook_name, branding_image, admin_notes, profile_completed_at, created_at, archived, email_opt_out';
 
 type AccountSummaryRow = {
   id: string;
@@ -722,6 +733,7 @@ type AccountSummaryRow = {
   branding_image?: string | null;
   profile_completed_at: string | null;
   archived?: boolean;
+  email_opt_out?: boolean;
 };
 
 type AccountDetailRow = AccountSummaryRow & {
@@ -801,31 +813,60 @@ export async function listEmailRecipients(
     return [];
   }
   if (audience === 'vendors') {
-    const selected = await supabase.from('users').select('name, email').eq('archived', false);
-    if (selected.error?.message.includes('archived')) {
-      const fallback = await supabase.from('users').select('name, email');
-      if (fallback.error) {
-        throw databaseFailure(fallback.error.message);
-      }
-      return uniqueRecipients((fallback.data ?? []) as { name: string | null; email: string | null }[]);
-    }
-    if (selected.error) {
-      throw databaseFailure(selected.error.message);
-    }
-    return uniqueRecipients((selected.data ?? []) as { name: string | null; email: string | null }[]);
+    return uniqueRecipients(await selectVendorRecipients(true, true));
   }
 
-  const query = supabase.from('registrations').select('users(name, email)').eq('event_id', eventId);
-  const { data, error } = await (audience === 'unpaid' ? query.is('paid_at', null) : query);
-  if (error) {
-    throw databaseFailure(error.message);
-  }
+  const rows = await selectRegistrationRecipients(eventId, audience === 'unpaid', true);
   return uniqueRecipients(
-    ((data ?? []) as RegistrationEmailRow[]).map((row) => {
+    rows.flatMap((row) => {
       const account = Array.isArray(row.users) ? row.users[0] : row.users;
-      return { name: account?.name ?? null, email: account?.email ?? null };
+      if (account?.email_opt_out === true) {
+        return [];
+      }
+      return [{ name: account?.name ?? null, email: account?.email ?? null }];
     }),
   );
+}
+
+async function selectVendorRecipients(
+  hideArchived: boolean,
+  hideOptOut: boolean,
+): Promise<{ name: string | null; email: string | null }[]> {
+  const selected =
+    hideArchived && hideOptOut
+      ? await supabase.from('users').select('name, email').eq('archived', false).eq('email_opt_out', false)
+      : hideArchived
+        ? await supabase.from('users').select('name, email').eq('archived', false)
+        : hideOptOut
+          ? await supabase.from('users').select('name, email').eq('email_opt_out', false)
+          : await supabase.from('users').select('name, email');
+  if (!selected.error) {
+    return (selected.data ?? []) as { name: string | null; email: string | null }[];
+  }
+  if (hideOptOut && selected.error.message.includes('email_opt_out')) {
+    return selectVendorRecipients(hideArchived, false);
+  }
+  if (hideArchived && selected.error.message.includes('archived')) {
+    return selectVendorRecipients(false, hideOptOut);
+  }
+  throw databaseFailure(selected.error.message);
+}
+
+async function selectRegistrationRecipients(
+  eventId: string,
+  unpaid: boolean,
+  respectOptOut: boolean,
+): Promise<RegistrationEmailRow[]> {
+  const columns = respectOptOut ? 'users(name, email, email_opt_out)' : 'users(name, email)';
+  const query = supabase.from('registrations').select(columns).eq('event_id', eventId);
+  const selected = await (unpaid ? query.is('paid_at', null) : query);
+  if (!selected.error) {
+    return (selected.data ?? []) as unknown as RegistrationEmailRow[];
+  }
+  if (respectOptOut && selected.error.message.includes('email_opt_out')) {
+    return selectRegistrationRecipients(eventId, unpaid, false);
+  }
+  throw databaseFailure(selected.error.message);
 }
 
 async function eventExists(eventId: string): Promise<boolean> {
@@ -837,7 +878,10 @@ async function eventExists(eventId: string): Promise<boolean> {
 }
 
 type RegistrationEmailRow = {
-  users: { name: string | null; email: string | null } | { name: string | null; email: string | null }[] | null;
+  users:
+    | { name: string | null; email: string | null; email_opt_out?: boolean }
+    | { name: string | null; email: string | null; email_opt_out?: boolean }[]
+    | null;
 };
 
 export async function getAccount(userId: string): Promise<AccountDetail | null> {
@@ -858,11 +902,10 @@ async function selectAccountRow(columns: string, userId: string): Promise<Accoun
 }
 
 function accountColumnRetry(columns: string, message: string | undefined): string | null {
-  if (message?.includes('archived') && columns.split(', ').includes('archived')) {
-    return withoutColumn(columns, 'archived');
-  }
-  if (message?.includes('branding_image') && columns.split(', ').includes('branding_image')) {
-    return withoutColumn(columns, 'branding_image');
+  for (const column of ['email_opt_out', 'archived', 'branding_image']) {
+    if (message?.includes(column) && columns.split(', ').includes(column)) {
+      return withoutColumn(columns, column);
+    }
   }
   return null;
 }
@@ -899,6 +942,7 @@ function toAccountSummary(row: AccountSummaryRow): AccountSummary {
     profileComplete: isProfileComplete(row),
     brandingImage: storedBrandingImage(row.branding_image),
     archived: row.archived === true,
+    emailOptOut: row.email_opt_out === true,
   };
 }
 
@@ -1360,6 +1404,7 @@ function toProfileDraft(row: ProfileRow): VendorProfileDraft {
     productsAndServices: row.products_and_services?.trim() ?? '',
     facebookName: row.facebook_name?.trim() ?? '',
     brandingImage: storedBrandingImage(row.branding_image),
+    emailOptOut: row.email_opt_out === true,
   };
 }
 

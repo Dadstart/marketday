@@ -64,7 +64,18 @@ export function parseVendorProfile(body: Record<string, unknown>): VendorProfile
     ),
     facebookName: optionalText(body.facebookName, 160, 'Facebook name'),
     brandingImage: parseBrandingImage(body.brandingImage),
+    emailOptOut: parseEmailOptOut(body.emailOptOut),
   };
+}
+
+function parseEmailOptOut(value: unknown): boolean {
+  if (value == null) {
+    return false;
+  }
+  if (typeof value !== 'boolean') {
+    throw new ProfileError('Say whether you want market emails.');
+  }
+  return value;
 }
 
 const BRANDING_IMAGE = /^data:image\/(png|jpeg|gif|webp);base64,([A-Za-z0-9+/]+={0,2})$/;

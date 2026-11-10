@@ -1029,7 +1029,10 @@ function EmailVendors({ token, eventId }: { token: string; eventId: string }) {
             );
           })}
           {audience === 'vendors' ? (
-            <Text style={styles.muted}>Archived users are not included.</Text>
+            <Text style={styles.muted}>Archived users and people who opted out of email are not included.</Text>
+          ) : null}
+          {audience === 'registered' || audience === 'unpaid' ? (
+            <Text style={styles.muted}>People who opted out of email are not included.</Text>
           ) : null}
           {audience === 'addresses' ? (
             <Field
