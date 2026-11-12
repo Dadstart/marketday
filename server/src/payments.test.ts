@@ -16,6 +16,7 @@ import {
   missingSesSettings,
   SES_NOT_CONFIGURED,
   vendorEmailInput,
+  type EmailSendProgress,
 } from './mail.js';
 
 const owned = { registrationId: 'reg-1', userId: 'user-1', eventId: 'event-1' };
@@ -129,6 +130,32 @@ describe('outbound email', () => {
     assert.equal(sent[EMAILS_PER_SECOND], `v${EMAILS_PER_SECOND}@example.com`);
     assert.equal(result.sent, EMAILS_PER_SECOND + 1);
     assert.deepEqual(result.failed, [{ email: 'v3@example.com', error: 'Address not verified.' }]);
+  });
+
+  test('reports each address as it is sent, including ones that bounce', async () => {
+    const updates: EmailSendProgress[] = [];
+    const result = await deliverVendorEmails(
+      message.recipients,
+      async (email) => {
+        if (email === 'grace@example.com') {
+          throw Object.assign(new Error('Mailbox does not exist.'), { name: 'MessageRejected' });
+        }
+      },
+      {
+        onProgress: (progress) => {
+          updates.push(progress);
+        },
+      },
+    );
+    assert.deepEqual(updates[0], { total: 2, sent: 1, failed: [], done: false });
+    assert.deepEqual(updates[1], {
+      total: 2,
+      sent: 1,
+      failed: [{ email: 'grace@example.com', error: 'Mailbox does not exist.' }],
+      done: false,
+    });
+    assert.equal(result.sent, 1);
+    assert.deepEqual(result.failed, updates[1]?.failed);
   });
 
   test('stops the whole send when the account itself cannot send', async () => {

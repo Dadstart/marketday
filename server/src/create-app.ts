@@ -6,7 +6,7 @@ import type { CheckoutState, ConfirmedPayment } from './checkout.js';
 import { DatabaseError, PaymentError, SesError } from './errors.js';
 import { feeCents } from './fees.js';
 import { isEmailAudience, isMapArea, type EmailAudience } from './guards.js';
-import type { EmailMessage } from './mail.js';
+import type { EmailMessage, EmailSendProgress } from './mail.js';
 import {
   parseAdminNotes,
   parseAvailableSpaces,
@@ -82,7 +82,10 @@ export type AppServices = {
   ) => Promise<void>;
   emailAudienceCounts: (eventId: string) => Promise<{ vendors: number; registered: number; unpaid: number } | null>;
   listEmailRecipients: (audience: EmailAudience, eventId: string) => Promise<{ name: string; email: string }[]>;
-  sendVendorEmails: (input: EmailMessage) => Promise<{ sent: number; failed: { email: string; error: string }[] }>;
+  sendVendorEmails: (
+    input: EmailMessage,
+    onProgress?: (progress: EmailSendProgress) => Promise<void> | void,
+  ) => Promise<{ sent: number; failed: { email: string; error: string }[] }>;
   getEventMap: (eventId: string) => Promise<EventMap | null>;
   saveEventVolunteers: (eventId: string, volunteers: string) => Promise<void>;
   assignEventSpace: (eventId: string, area: MapArea, spot: number, registrationId: string | null) => Promise<void>;
@@ -513,15 +516,19 @@ export function createApp(deps: AppServices) {
     if (recipients.length === 0) {
       throw new HttpError(400, audience === 'addresses' ? 'Enter at least one email address.' : 'No vendors match that choice.');
     }
-    const result = await sendVendorEmails({
-      replyTo: admin.email,
-      subject,
-      html: `<!DOCTYPE html><html><body>${htmlBody}</body></html>`,
-      text,
-      images,
-      recipients,
-    });
-    return c.json(result);
+    return streamEmailSend(recipients.length, (onProgress) =>
+      sendVendorEmails(
+        {
+          replyTo: admin.email,
+          subject,
+          html: `<!DOCTYPE html><html><body>${htmlBody}</body></html>`,
+          text,
+          images,
+          recipients,
+        },
+        onProgress,
+      ),
+    );
   });
 
   app.get('/events/:id/map', async (c) => {
@@ -676,6 +683,72 @@ export function createApp(deps: AppServices) {
   }
 
   return app;
+}
+
+function streamEmailSend(
+  total: number,
+  send: (
+    onProgress: (progress: EmailSendProgress) => Promise<void>,
+  ) => Promise<{ sent: number; failed: EmailSendProgress['failed'] }>,
+): Promise<Response> {
+  let opened = false;
+  let latest: EmailSendProgress = { total, sent: 0, failed: [], done: false };
+  let resolveResponse: (response: Response) => void = () => {};
+  let rejectResponse: (error: unknown) => void = () => {};
+  const pending = new Promise<Response>((resolve, reject) => {
+    resolveResponse = resolve;
+    rejectResponse = reject;
+  });
+  const encoder = new TextEncoder();
+  let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
+  const stream = new ReadableStream<Uint8Array>({
+    start(control) {
+      controller = control;
+    },
+  });
+
+  const publish = (event: EmailSendProgress) => {
+    latest = event;
+    if (!controller) {
+      return;
+    }
+    if (!opened) {
+      opened = true;
+      resolveResponse(
+        new Response(stream, {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/x-ndjson; charset=utf-8',
+            'Cache-Control': 'no-cache, no-transform',
+          },
+        }),
+      );
+    }
+    controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+  };
+
+  void Promise.resolve()
+    .then(() =>
+      send(async (progress) => {
+        publish({ ...progress, total, done: false });
+      }),
+    )
+    .then((result) => {
+      publish({ total, sent: result.sent, failed: result.failed, done: true });
+      controller?.close();
+    })
+    .catch((error: unknown) => {
+      if (!opened) {
+        controller?.close();
+        rejectResponse(error);
+        return;
+      }
+      const message = error instanceof Error && error.message.trim() ? error.message.trim() : 'The email could not be sent.';
+      publish({ ...latest, total, done: true, error: message });
+      controller?.close();
+    });
+
+  return pending;
 }
 
 function bearerToken(header: string | undefined): string {

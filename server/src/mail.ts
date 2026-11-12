@@ -84,9 +84,20 @@ function errorMessage(error: unknown): string {
 
 export const EMAILS_PER_SECOND = 10;
 
+export type EmailFailure = { email: string; error: string };
+
+export type EmailSendProgress = {
+  total: number;
+  sent: number;
+  failed: EmailFailure[];
+  done: boolean;
+  error?: string;
+};
+
 type EmailPace = {
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
+  onProgress?: (progress: EmailSendProgress) => Promise<void> | void;
 };
 
 type EmailWindow = { start: number; used: number };
@@ -118,12 +129,13 @@ export async function deliverVendorEmails(
   recipients: { email: string }[],
   send: (email: string) => Promise<void>,
   pace: EmailPace = {},
-): Promise<{ sent: number; failed: { email: string; error: string }[] }> {
+): Promise<{ sent: number; failed: EmailFailure[] }> {
   const now = pace.now ?? Date.now;
   const sleep = pace.sleep ?? delay;
   const window = pace.now ? { start: -1, used: 0 } : sharedWindow;
-  const failed: { email: string; error: string }[] = [];
+  const failed: EmailFailure[] = [];
   let sent = 0;
+  const total = recipients.length;
   for (const recipient of recipients) {
     await takeEmailSlot(window, now, sleep);
     try {
@@ -138,6 +150,7 @@ export async function deliverVendorEmails(
       }
       failed.push({ email: recipient.email, error: errorMessage(error) });
     }
+    await pace.onProgress?.({ total, sent, failed: [...failed], done: false });
   }
   return { sent, failed };
 }

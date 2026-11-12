@@ -335,7 +335,15 @@ export function fetchEmailAudiences(token: string, eventId: string): Promise<Ema
   return request(`/events/${eventId}/email-audiences`, token);
 }
 
-export function sendEventEmail(
+export type EmailSendProgress = {
+  total: number;
+  sent: number;
+  failed: { email: string; error: string }[];
+  done: boolean;
+  error?: string;
+};
+
+export async function sendEventEmail(
   token: string,
   eventId: string,
   audience: EmailAudience,
@@ -343,11 +351,93 @@ export function sendEventEmail(
   text: string,
   images: EmailImage[],
   addresses: string,
+  onProgress?: (progress: EmailSendProgress) => void,
 ): Promise<{ sent: number; failed: { email: string; error: string }[] }> {
-  return request(`/events/${eventId}/email`, token, {
-    method: 'POST',
-    body: JSON.stringify({ audience, subject, text, images, addresses }),
-  });
+  const headers = new Headers();
+  headers.set('Accept', 'application/x-ndjson, application/json');
+  headers.set('Content-Type', 'application/json');
+  headers.set('Authorization', `Bearer ${token}`);
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}/events/${eventId}/email`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ audience, subject, text, images, addresses }),
+    });
+  } catch {
+    throw new ApiError('The Community Day server is not running.', 0);
+  }
+
+  if (!response.ok) {
+    const body: unknown = await response.json().catch(() => null);
+    const message =
+      body && typeof body === 'object' && 'error' in body && typeof body.error === 'string' ? body.error : 'The request failed.';
+    throw new ApiError(message, response.status);
+  }
+
+  const last = await readEmailProgress(response, onProgress);
+  return { sent: last.sent, failed: last.failed };
+}
+
+async function readEmailProgress(
+  response: Response,
+  onProgress?: (progress: EmailSendProgress) => void,
+): Promise<EmailSendProgress> {
+  const reader = response.body?.getReader();
+  const updates: EmailSendProgress[] = [];
+  const apply = (line: string) => {
+    let event: EmailSendProgress;
+    try {
+      event = JSON.parse(line) as EmailSendProgress;
+    } catch {
+      throw new ApiError('The email send returned an unexpected update.', 502);
+    }
+    if (typeof event.sent !== 'number' || !Array.isArray(event.failed)) {
+      throw new ApiError('The email send returned an unexpected update.', 502);
+    }
+    updates.push(event);
+    onProgress?.(event);
+  };
+
+  if (!reader) {
+    const text = await response.text();
+    for (const line of text.split('\n')) {
+      if (line.trim()) {
+        apply(line);
+      }
+    }
+  } else {
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
+      }
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        if (line.trim()) {
+          apply(line);
+        }
+      }
+    }
+    buffer += decoder.decode();
+    if (buffer.trim()) {
+      apply(buffer);
+    }
+  }
+
+  const finished = updates.at(-1);
+  if (!finished || finished.done === false) {
+    throw new ApiError('The email send stopped before it finished.', 502);
+  }
+  if (finished.error) {
+    throw new ApiError(finished.error, 502);
+  }
+  return finished;
 }
 
 export function startEventPayment(

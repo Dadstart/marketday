@@ -4,7 +4,7 @@ import { describe, test } from 'node:test';
 import { parseAddressList } from '../../client/src/email/addresses.js';
 import { createApp, type AppServices } from './create-app.js';
 import { DatabaseError, SesError } from './errors.js';
-import type { EmailMessage } from './mail.js';
+import type { EmailMessage, EmailSendProgress } from './mail.js';
 import type { CurrentUser, EventRecord } from './types.js';
 
 const future = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -781,5 +781,60 @@ describe('emailing vendors', () => {
     });
     assert.equal(response.status, 503);
     assert.match(response.body?.error ?? '', /SES_FROM_EMAIL/);
+  });
+
+  test('streams progress and keeps every address that could not be delivered', async () => {
+    const failed = [{ email: 'grace@example.com', error: 'Mailbox does not exist.' }];
+    const app = appFor(admin, {
+      emailAudienceCounts: async () => ({ vendors: 2, registered: 2, unpaid: 0 }),
+      listEmailRecipients: async () => [
+        { name: 'Ada', email: 'ada@example.com' },
+        { name: 'Grace', email: 'grace@example.com' },
+      ],
+      sendVendorEmails: async (_input, onProgress) => {
+        await onProgress?.({ total: 2, sent: 1, failed: [], done: false });
+        await onProgress?.({ total: 2, sent: 1, failed, done: false });
+        return { sent: 1, failed };
+      },
+    });
+    const response = await app.request('/events/event-1/email', {
+      method: 'POST',
+      headers: { authorization: 'Bearer session', 'content-type': 'application/json' },
+      body: JSON.stringify({ audience: 'registered', subject: 'Hello', text: 'Hi' }),
+    });
+    assert.equal(response.status, 200);
+    const lines = (await response.text())
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as EmailSendProgress);
+    assert.equal(lines[0]?.sent, 1);
+    assert.deepEqual(lines[1]?.failed, failed);
+    assert.deepEqual(lines.at(-1), { total: 2, sent: 1, failed, done: true });
+  });
+
+  test('keeps earlier failures when sending has to stop', async () => {
+    const failed = [{ email: 'grace@example.com', error: 'Mailbox does not exist.' }];
+    const app = appFor(admin, {
+      emailAudienceCounts: async () => ({ vendors: 2, registered: 2, unpaid: 0 }),
+      listEmailRecipients: async () => [
+        { name: 'Grace', email: 'grace@example.com' },
+        { name: 'Ada', email: 'ada@example.com' },
+      ],
+      sendVendorEmails: async (_input, onProgress) => {
+        await onProgress?.({ total: 2, sent: 0, failed, done: false });
+        throw new SesError(502, 'Sending is paused.');
+      },
+    });
+    const response = await app.request('/events/event-1/email', {
+      method: 'POST',
+      headers: { authorization: 'Bearer session', 'content-type': 'application/json' },
+      body: JSON.stringify({ audience: 'registered', subject: 'Hello', text: 'Hi' }),
+    });
+    assert.equal(response.status, 200);
+    const lines = (await response.text())
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as EmailSendProgress);
+    assert.deepEqual(lines.at(-1), { total: 2, sent: 0, failed, done: true, error: 'Sending is paused.' });
   });
 });

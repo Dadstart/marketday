@@ -9,6 +9,7 @@ import {
   SES_NOT_CONFIGURED,
   vendorEmailInput,
   type EmailMessage,
+  type EmailSendProgress,
 } from './mail.js';
 
 export { SesError };
@@ -25,6 +26,7 @@ export function sesConfigured(): boolean {
 
 export async function sendVendorEmails(
   input: EmailMessage,
+  onProgress?: (progress: EmailSendProgress) => Promise<void> | void,
 ): Promise<{ sent: number; failed: { email: string; error: string }[] }> {
   const from = sesFromEmail;
   const region = awsRegion;
@@ -39,9 +41,13 @@ export async function sendVendorEmails(
     credentials: { accessKeyId, secretAccessKey },
   });
   try {
-    return await deliverVendorEmails(input.recipients, async (email) => {
-      await client.send(new SendEmailCommand(vendorEmailInput(from, input, email)));
-    });
+    return await deliverVendorEmails(
+      input.recipients,
+      async (email) => {
+        await client.send(new SendEmailCommand(vendorEmailInput(from, input, email)));
+      },
+      { onProgress },
+    );
   } catch (error) {
     if (error instanceof DeliveryStopped) {
       throw new SesError(502, error.message);
