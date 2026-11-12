@@ -15,6 +15,8 @@ describe('api address', () => {
 
   test('local web development keeps the API port', () => {
     assert.equal(resolveApiUrl('http://localhost:8787', local), 'http://localhost:8787');
+    assert.equal(resolveApiUrl('http://127.0.0.1:9090', local), 'http://127.0.0.1:9090');
+    assert.equal(resolveApiUrl('https://crosswindscommunityday.com', local), 'http://localhost:8787');
   });
 
   test('a separate https API address is kept', () => {

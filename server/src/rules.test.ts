@@ -173,7 +173,7 @@ describe('map spots', () => {
     }
     assert.equal(counts.get('pavilion'), 13);
     assert.equal(counts.get('grass'), 28);
-    assert.equal(counts.get('food-truck'), 2);
+    assert.equal(counts.get('food-truck'), 4);
     assert.equal(spotLimit('pavilion'), mapSpotLimit('pavilion'));
     assert.equal(spotLimit('grass'), mapSpotLimit('grass'));
     assert.equal(spotLimit('food-truck'), mapSpotLimit('food-truck'));
@@ -182,7 +182,8 @@ describe('map spots', () => {
   test('rejects a spot number the map does not have', () => {
     assert.doesNotThrow(() => assertAssignableSpot('pavilion', 13));
     assert.throws(() => assertAssignableSpot('pavilion', 14), /not on the map/);
-    assert.throws(() => assertAssignableSpot('food-truck', 0), /not on the map/);
+    assert.doesNotThrow(() => assertAssignableSpot('food-truck', 4));
+    assert.throws(() => assertAssignableSpot('food-truck', 5), /not on the map/);
     assert.equal(areaLabel('food-truck'), 'Food truck');
   });
 });

@@ -8,7 +8,7 @@ const spaceOrder: SpaceRequest[] = ['grass-generator', 'grass', 'food-truck', 'p
 const spotLimits: Record<MapArea, number> = {
   pavilion: 13,
   grass: 28,
-  'food-truck': 2,
+  'food-truck': 4,
 };
 
 export function isEmailAudience(value: string): value is EmailAudience {

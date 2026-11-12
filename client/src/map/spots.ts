@@ -56,6 +56,8 @@ export const MAP_SPOTS: MapSpot[] = [
   { area: 'pavilion', spot: 13, left: 47.8, top: 51.7, width: 2.05, height: 2.86 },
   { area: 'food-truck', spot: 1, left: 80.52, top: 74.32, width: 3.22, height: 4.77 },
   { area: 'food-truck', spot: 2, left: 80.52, top: 82.49, width: 3.22, height: 4.9 },
+  { area: 'food-truck', spot: 3, left: 76.17, top: 74.39, width: 3.22, height: 4.77 },
+  { area: 'food-truck', spot: 4, left: 76.17, top: 82.56, width: 3.22, height: 4.9 },
 ];
 
 export function areaLabel(area: MapArea): string {
@@ -73,7 +75,7 @@ export function spotLimit(area: MapArea): number {
     return 13;
   }
   if (area === 'food-truck') {
-    return 2;
+    return 4;
   }
   return 28;
 }

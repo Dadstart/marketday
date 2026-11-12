@@ -17,7 +17,7 @@ The API listens on `http://localhost:8787`. The Expo app calls it after sign-in.
 
 The database is the Supabase project at `https://fiwpwhgcyhaujunmcdxw.supabase.co`.
 
-1. Open the SQL editor and run `server/supabase/migrations/20261030120000_init.sql`, then `server/supabase/migrations/20261030130000_vendor_profile.sql`, then `server/supabase/migrations/20261030140000_registration_payment.sql`, then `server/supabase/migrations/20261030150000_registration_space.sql`, then `server/supabase/migrations/20261030160000_same_email.sql`, then `server/supabase/migrations/20261030170000_event_spaces.sql`, then `server/supabase/migrations/20261104160000_admin_notes.sql`, then `server/supabase/migrations/20261105150000_registration_spaces.sql`, then `server/supabase/migrations/20261105153000_registration_space_counts.sql`, then `server/supabase/migrations/20261105180000_space_assignments.sql`, then `server/supabase/migrations/20261105190000_event_volunteers.sql`, then `server/supabase/migrations/20261105200000_branding_image.sql`, then `server/supabase/migrations/20261109100000_user_archived.sql`, then `server/supabase/migrations/20261110150000_email_opt_out.sql`.
+1. Open the SQL editor and run `server/supabase/migrations/20261030120000_init.sql`, then `server/supabase/migrations/20261030130000_vendor_profile.sql`, then `server/supabase/migrations/20261030140000_registration_payment.sql`, then `server/supabase/migrations/20261030150000_registration_space.sql`, then `server/supabase/migrations/20261030160000_same_email.sql`, then `server/supabase/migrations/20261030170000_event_spaces.sql`, then `server/supabase/migrations/20261104160000_admin_notes.sql`, then `server/supabase/migrations/20261105150000_registration_spaces.sql`, then `server/supabase/migrations/20261105153000_registration_space_counts.sql`, then `server/supabase/migrations/20261105180000_space_assignments.sql`, then `server/supabase/migrations/20261105190000_event_volunteers.sql`, then `server/supabase/migrations/20261105200000_branding_image.sql`, then `server/supabase/migrations/20261109100000_user_archived.sql`, then `server/supabase/migrations/20261110150000_email_opt_out.sql`, then `server/supabase/migrations/20261112150000_food_truck_spots.sql`.
 2. In Project Settings → API, copy the `service_role` key into `SUPABASE_SERVICE_ROLE_KEY` in `.env`.
 3. Set `SESSION_SECRET` in `.env` to a long random string.
 
@@ -85,6 +85,8 @@ Microsoft sign-in uses the authorization code flow with PKCE on every platform. 
 Users, events, and registrations live in Supabase. After sign-in, the app keeps a session token on the device until it expires or you sign out. iOS and Android use the keychain and encrypted storage. The web app uses `localStorage`. The Google or Microsoft identity token is checked once by the server and is not saved.
 
 ## Deployment
+
+ssh raspberrypi-server
 
 ### Client
 cd /home/andrew/pi/marketday

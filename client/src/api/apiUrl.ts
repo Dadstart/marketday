@@ -8,7 +8,7 @@ export function resolveApiUrl(
   }
   const pageIsLocal = page.hostname === 'localhost' || page.hostname === '127.0.0.1';
   if (pageIsLocal) {
-    return value;
+    return localApiUrl(value);
   }
   let api: URL;
   try {
@@ -22,4 +22,16 @@ export function resolveApiUrl(
     return page.origin;
   }
   return api.origin;
+}
+
+function localApiUrl(configured: string): string {
+  try {
+    const api = new URL(configured);
+    if (api.hostname === 'localhost' || api.hostname === '127.0.0.1') {
+      return api.origin;
+    }
+  } catch {
+    // A remote address in .env is for the published site. Local pages use the API port.
+  }
+  return 'http://localhost:8787';
 }
