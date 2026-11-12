@@ -809,6 +809,109 @@ export async function setAccountArchived(userId: string, archived: boolean): Pro
   return getAccount(userId);
 }
 
+const EMAIL_LOG_MIGRATION =
+  'Run server/supabase/migrations/20261112180000_email_deliveries.sql in the Supabase SQL editor.';
+
+export type EmailDeliveryRecord = {
+  vendorName: string;
+  email: string;
+  status: 'sent' | 'failed';
+  result: string;
+  subject: string;
+  sentAt: string;
+};
+
+function missingEmailLog(message: string | undefined): boolean {
+  return Boolean(message && (message.includes('email_deliveries') || message.includes('does not exist') || message.includes('schema cache')));
+}
+
+export async function assertEmailLog(): Promise<void> {
+  const selected = await supabase.from('email_deliveries').select('id').limit(1);
+  if (missingEmailLog(selected.error?.message)) {
+    throw new DatabaseError(503, EMAIL_LOG_MIGRATION);
+  }
+  if (selected.error) {
+    throw databaseFailure(selected.error.message);
+  }
+}
+
+export async function lookupVendorNames(emails: string[]): Promise<Record<string, string>> {
+  const wanted = new Set(emails.map((email) => email.toLowerCase()));
+  if (wanted.size === 0) {
+    return {};
+  }
+  const selected = await supabase.from('users').select('name, email');
+  if (selected.error) {
+    throw databaseFailure(selected.error.message);
+  }
+  const names: Record<string, string> = {};
+  for (const row of selected.data ?? []) {
+    const email = typeof row.email === 'string' ? row.email.trim().toLowerCase() : '';
+    const name = typeof row.name === 'string' ? row.name.trim() : '';
+    if (email && name && wanted.has(email)) {
+      names[email] = name;
+    }
+  }
+  return names;
+}
+
+export async function recordEmailDelivery(row: {
+  eventId: string;
+  subject: string;
+  vendorName: string;
+  email: string;
+  status: 'sent' | 'failed';
+  result: string;
+}): Promise<void> {
+  const inserted = await supabase.from('email_deliveries').insert({
+    event_id: row.eventId,
+    subject: row.subject,
+    vendor_name: row.vendorName,
+    email: row.email,
+    status: row.status,
+    result: row.result,
+  });
+  if (missingEmailLog(inserted.error?.message)) {
+    throw new DatabaseError(503, EMAIL_LOG_MIGRATION);
+  }
+  if (inserted.error) {
+    throw databaseFailure(inserted.error.message);
+  }
+}
+
+export async function listEmailDeliveries(eventId: string): Promise<EmailDeliveryRecord[] | null> {
+  if (!(await eventExists(eventId))) {
+    return null;
+  }
+  const selected = await supabase
+    .from('email_deliveries')
+    .select('vendor_name, email, status, result, subject, created_at')
+    .eq('event_id', eventId)
+    .order('created_at', { ascending: true });
+  if (missingEmailLog(selected.error?.message)) {
+    throw new DatabaseError(503, EMAIL_LOG_MIGRATION);
+  }
+  if (selected.error) {
+    throw databaseFailure(selected.error.message);
+  }
+  return (selected.data ?? []).flatMap((row) => {
+    const status = row.status === 'sent' || row.status === 'failed' ? row.status : null;
+    if (!status || typeof row.email !== 'string') {
+      return [];
+    }
+    return [
+      {
+        vendorName: typeof row.vendor_name === 'string' ? row.vendor_name : row.email,
+        email: row.email,
+        status,
+        result: typeof row.result === 'string' ? row.result : '',
+        subject: typeof row.subject === 'string' ? row.subject : '',
+        sentAt: typeof row.created_at === 'string' ? row.created_at : '',
+      },
+    ];
+  });
+}
+
 export async function emailAudienceCounts(
   eventId: string,
 ): Promise<{ vendors: number; registered: number; unpaid: number } | null> {

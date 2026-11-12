@@ -17,7 +17,9 @@ import {
   confirmCheckout,
   createEvent,
   deleteEvent,
+  downloadEmailLog,
   fetchEmailAudiences,
+  fetchEmailLog,
   fetchEvent,
   fetchEvents,
   markRegistrationPaid,
@@ -27,6 +29,7 @@ import {
   type EmailAudience,
   type EmailAudienceCounts,
   type EmailImage,
+  type EmailLogSummary,
   type EmailSendProgress,
   unregisterFromEvent,
   updateEvent,
@@ -933,6 +936,8 @@ function EmailVendors({ token, eventId }: { token: string; eventId: string }) {
   const [images, setImages] = useState<EmailImage[]>([]);
   const [addresses, setAddresses] = useState('');
   const [counts, setCounts] = useState<EmailAudienceCounts | null>(null);
+  const [log, setLog] = useState<EmailLogSummary | null>(null);
+  const [downloading, setDownloading] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -948,6 +953,17 @@ function EmailVendors({ token, eventId }: { token: string; eventId: string }) {
       .then((next) => {
         if (active) {
           setCounts(next);
+        }
+      })
+      .catch((reason: unknown) => {
+        if (active) {
+          setError(messageFrom(reason));
+        }
+      });
+    fetchEmailLog(token, eventId)
+      .then((next) => {
+        if (active) {
+          setLog(next);
         }
       })
       .catch((reason: unknown) => {
@@ -998,6 +1014,23 @@ function EmailVendors({ token, eventId }: { token: string; eventId: string }) {
       setProgress((current) => (current && (current.sent > 0 || current.failed.length > 0) ? { ...current, done: true } : null));
     } finally {
       setBusy(false);
+      try {
+        setLog(await fetchEmailLog(token, eventId));
+      } catch (reason) {
+        setError(messageFrom(reason));
+      }
+    }
+  }
+
+  async function downloadLog() {
+    setDownloading(true);
+    setError(null);
+    try {
+      await downloadEmailLog(token, eventId);
+    } catch (reason) {
+      setError(messageFrom(reason));
+    } finally {
+      setDownloading(false);
     }
   }
 
@@ -1036,6 +1069,17 @@ function EmailVendors({ token, eventId }: { token: string; eventId: string }) {
               </Pressable>
             );
           })}
+          <Text style={styles.muted}>{emailLogLabel(log)}</Text>
+          <Pressable
+            accessibilityRole="button"
+            disabled={busy || downloading}
+            onPress={() => {
+              void downloadLog();
+            }}
+            style={[pointer, (busy || downloading) && styles.disabled]}
+          >
+            <Text style={styles.back}>{downloading ? 'Preparing download…' : 'Download email log'}</Text>
+          </Pressable>
           {audience === 'vendors' ? (
             <Text style={styles.muted}>Archived users and people who opted out of email are not included.</Text>
           ) : null}
@@ -1116,6 +1160,19 @@ function EmailVendors({ token, eventId }: { token: string; eventId: string }) {
       ) : null}
     </View>
   );
+}
+
+function emailLogLabel(log: EmailLogSummary | null): string {
+  if (!log) {
+    return 'Saved sends for this event can be downloaded.';
+  }
+  const total = log.sent + log.failed;
+  if (total === 0) {
+    return 'No emails have been saved for this event yet.';
+  }
+  const delivered = log.sent === 1 ? '1 delivered' : `${log.sent} delivered`;
+  const missed = log.failed === 1 ? '1 not delivered' : `${log.failed} not delivered`;
+  return `${delivered}, ${missed}.`;
 }
 
 function EmailSendStatus({ progress, busy }: { progress: EmailSendProgress; busy: boolean }) {

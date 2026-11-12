@@ -335,6 +335,41 @@ export function fetchEmailAudiences(token: string, eventId: string): Promise<Ema
   return request(`/events/${eventId}/email-audiences`, token);
 }
 
+export type EmailLogSummary = { sent: number; failed: number };
+
+export function fetchEmailLog(token: string, eventId: string): Promise<EmailLogSummary> {
+  return request(`/events/${eventId}/email-log`, token);
+}
+
+export async function downloadEmailLog(token: string, eventId: string): Promise<void> {
+  const headers = new Headers();
+  headers.set('Authorization', `Bearer ${token}`);
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}/events/${eventId}/email-log.csv`, { headers });
+  } catch {
+    throw new ApiError('The Community Day server is not running.', 0);
+  }
+  if (!response.ok) {
+    const body: unknown = await response.json().catch(() => null);
+    const message =
+      body && typeof body === 'object' && 'error' in body && typeof body.error === 'string' ? body.error : 'The request failed.';
+    throw new ApiError(message, response.status);
+  }
+  const csv = await response.text();
+  if (typeof document === 'undefined') {
+    throw new ApiError('Download the email log from the web app.', 400);
+  }
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'email-log.csv';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 export type EmailSendProgress = {
   total: number;
   sent: number;

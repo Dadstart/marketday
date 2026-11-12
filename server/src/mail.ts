@@ -86,12 +86,19 @@ export const EMAILS_PER_SECOND = 10;
 
 export type EmailFailure = { email: string; error: string };
 
+export type EmailAttempt = {
+  email: string;
+  status: 'sent' | 'failed';
+  error: string;
+};
+
 export type EmailSendProgress = {
   total: number;
   sent: number;
   failed: EmailFailure[];
   done: boolean;
   error?: string;
+  latest?: EmailAttempt;
 };
 
 type EmailPace = {
@@ -138,19 +145,31 @@ export async function deliverVendorEmails(
   const total = recipients.length;
   for (const recipient of recipients) {
     await takeEmailSlot(window, now, sleep);
+    let latest: EmailSendProgress['latest'];
     try {
       await send(recipient.email);
       sent += 1;
+      latest = { email: recipient.email, status: 'sent', error: '' };
     } catch (error) {
       if (error instanceof DeliveryStopped) {
         throw error;
       }
+      const message = errorMessage(error);
       if (isFatalSesError(errorName(error))) {
-        throw new DeliveryStopped(errorMessage(error));
+        failed.push({ email: recipient.email, error: message });
+        await pace.onProgress?.({
+          total,
+          sent,
+          failed: [...failed],
+          done: false,
+          latest: { email: recipient.email, status: 'failed', error: message },
+        });
+        throw new DeliveryStopped(message);
       }
-      failed.push({ email: recipient.email, error: errorMessage(error) });
+      failed.push({ email: recipient.email, error: message });
+      latest = { email: recipient.email, status: 'failed', error: message };
     }
-    await pace.onProgress?.({ total, sent, failed: [...failed], done: false });
+    await pace.onProgress?.({ total, sent, failed: [...failed], done: false, latest });
   }
   return { sent, failed };
 }

@@ -6,6 +6,7 @@ import type { CheckoutState, ConfirmedPayment } from './checkout.js';
 import { DatabaseError, PaymentError, SesError } from './errors.js';
 import { feeCents } from './fees.js';
 import { isEmailAudience, isMapArea, type EmailAudience } from './guards.js';
+import { emailLogCsv, emailLogSummary, type EmailLogRow } from './email-log.js';
 import type { EmailMessage, EmailSendProgress } from './mail.js';
 import {
   parseAdminNotes,
@@ -82,6 +83,17 @@ export type AppServices = {
   ) => Promise<void>;
   emailAudienceCounts: (eventId: string) => Promise<{ vendors: number; registered: number; unpaid: number } | null>;
   listEmailRecipients: (audience: EmailAudience, eventId: string) => Promise<{ name: string; email: string }[]>;
+  assertEmailLog: () => Promise<void>;
+  lookupVendorNames: (emails: string[]) => Promise<Record<string, string>>;
+  recordEmailDelivery: (row: {
+    eventId: string;
+    subject: string;
+    vendorName: string;
+    email: string;
+    status: 'sent' | 'failed';
+    result: string;
+  }) => Promise<void>;
+  listEmailDeliveries: (eventId: string) => Promise<EmailLogRow[] | null>;
   sendVendorEmails: (
     input: EmailMessage,
     onProgress?: (progress: EmailSendProgress) => Promise<void> | void,
@@ -143,6 +155,10 @@ export function createApp(deps: AppServices) {
     markRegistrationPaidByAdmin,
     emailAudienceCounts,
     listEmailRecipients,
+    assertEmailLog,
+    lookupVendorNames,
+    recordEmailDelivery,
+    listEmailDeliveries,
     sendVendorEmails,
     getEventMap,
     saveEventVolunteers,
@@ -511,11 +527,13 @@ export function createApp(deps: AppServices) {
     if (!(await emailAudienceCounts(eventId))) {
       throw new HttpError(404, 'That event does not exist.');
     }
-    const recipients =
+    const recipients: { name?: string; email: string }[] =
       audience === 'addresses' ? parseRecipientAddresses(body.addresses) : await listEmailRecipients(audience, eventId);
     if (recipients.length === 0) {
       throw new HttpError(400, audience === 'addresses' ? 'Enter at least one email address.' : 'No vendors match that choice.');
     }
+    await assertEmailLog();
+    const names = await deliveryNames(recipients, lookupVendorNames);
     return streamEmailSend(recipients.length, (onProgress) =>
       sendVendorEmails(
         {
@@ -526,9 +544,43 @@ export function createApp(deps: AppServices) {
           images,
           recipients,
         },
-        onProgress,
+        async (progress) => {
+          const latest = progress.latest;
+          if (latest) {
+            await recordEmailDelivery({
+              eventId,
+              subject,
+              vendorName: names.get(latest.email.toLowerCase()) || latest.email,
+              email: latest.email,
+              status: latest.status,
+              result: latest.status === 'sent' ? 'Sent' : latest.error || 'Not delivered',
+            });
+          }
+          await onProgress(progress);
+        },
       ),
     );
+  });
+
+  app.get('/events/:id/email-log', async (c) => {
+    requireRegistrationAdmin(c.get('user'));
+    const rows = await listEmailDeliveries(c.req.param('id'));
+    if (!rows) {
+      throw new HttpError(404, 'That event does not exist.');
+    }
+    return c.json(emailLogSummary(rows));
+  });
+
+  app.get('/events/:id/email-log.csv', async (c) => {
+    requireRegistrationAdmin(c.get('user'));
+    const rows = await listEmailDeliveries(c.req.param('id'));
+    if (!rows) {
+      throw new HttpError(404, 'That event does not exist.');
+    }
+    return c.body(emailLogCsv(rows), 200, {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': 'attachment; filename="email-log.csv"',
+    });
   });
 
   app.get('/events/:id/map', async (c) => {
@@ -683,6 +735,20 @@ export function createApp(deps: AppServices) {
   }
 
   return app;
+}
+
+async function deliveryNames(
+  recipients: { name?: string; email: string }[],
+  lookupVendorNames: (emails: string[]) => Promise<Record<string, string>>,
+): Promise<Map<string, string>> {
+  const missing = recipients.filter((recipient) => !recipient.name?.trim()).map((recipient) => recipient.email);
+  const lookedUp = missing.length > 0 ? await lookupVendorNames(missing) : {};
+  return new Map(
+    recipients.map((recipient) => {
+      const email = recipient.email.toLowerCase();
+      return [email, recipient.name?.trim() || lookedUp[email] || recipient.email];
+    }),
+  );
 }
 
 function streamEmailSend(

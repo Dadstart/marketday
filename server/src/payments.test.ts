@@ -147,12 +147,19 @@ describe('outbound email', () => {
         },
       },
     );
-    assert.deepEqual(updates[0], { total: 2, sent: 1, failed: [], done: false });
+    assert.deepEqual(updates[0], {
+      total: 2,
+      sent: 1,
+      failed: [],
+      done: false,
+      latest: { email: 'ada@example.com', status: 'sent', error: '' },
+    });
     assert.deepEqual(updates[1], {
       total: 2,
       sent: 1,
       failed: [{ email: 'grace@example.com', error: 'Mailbox does not exist.' }],
       done: false,
+      latest: { email: 'grace@example.com', status: 'failed', error: 'Mailbox does not exist.' },
     });
     assert.equal(result.sent, 1);
     assert.deepEqual(result.failed, updates[1]?.failed);
@@ -160,15 +167,25 @@ describe('outbound email', () => {
 
   test('stops the whole send when the account itself cannot send', async () => {
     const sent: string[] = [];
+    const updates: EmailSendProgress[] = [];
     await assert.rejects(
       () =>
-        deliverVendorEmails(message.recipients, async (email) => {
-          sent.push(email);
-          throw Object.assign(new Error('Sending is paused.'), { name: 'AccountSendingPausedException' });
-        }),
+        deliverVendorEmails(
+          message.recipients,
+          async (email) => {
+            sent.push(email);
+            throw Object.assign(new Error('Sending is paused.'), { name: 'AccountSendingPausedException' });
+          },
+          {
+            onProgress: (progress) => {
+              updates.push(progress);
+            },
+          },
+        ),
       (error: unknown) => error instanceof DeliveryStopped && error.message === 'Sending is paused.',
     );
     assert.deepEqual(sent, ['ada@example.com']);
+    assert.deepEqual(updates[0]?.latest, { email: 'ada@example.com', status: 'failed', error: 'Sending is paused.' });
     assert.equal(isFatalSesError('AccessDeniedException'), true);
     assert.equal(isFatalSesError('MessageRejected'), false);
   });
