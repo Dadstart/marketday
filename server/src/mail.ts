@@ -82,13 +82,50 @@ function errorMessage(error: unknown): string {
   return 'Amazon SES could not send that email.';
 }
 
+export const EMAILS_PER_SECOND = 10;
+
+type EmailPace = {
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
+};
+
+type EmailWindow = { start: number; used: number };
+
+const sharedWindow: EmailWindow = { start: -1, used: 0 };
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function takeEmailSlot(window: EmailWindow, now: () => number, sleep: (ms: number) => Promise<void>): Promise<void> {
+  const time = now();
+  if (window.start < 0 || time - window.start >= 1000) {
+    window.start = time;
+    window.used = 0;
+  }
+  if (window.used >= EMAILS_PER_SECOND) {
+    const wait = window.start + 1000 - time;
+    if (wait > 0) {
+      await sleep(wait);
+    }
+    window.start = now();
+    window.used = 0;
+  }
+  window.used += 1;
+}
+
 export async function deliverVendorEmails(
   recipients: { email: string }[],
   send: (email: string) => Promise<void>,
+  pace: EmailPace = {},
 ): Promise<{ sent: number; failed: { email: string; error: string }[] }> {
+  const now = pace.now ?? Date.now;
+  const sleep = pace.sleep ?? delay;
+  const window = pace.now ? { start: -1, used: 0 } : sharedWindow;
   const failed: { email: string; error: string }[] = [];
   let sent = 0;
   for (const recipient of recipients) {
+    await takeEmailSlot(window, now, sleep);
     try {
       await send(recipient.email);
       sent += 1;
