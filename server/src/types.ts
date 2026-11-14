@@ -17,6 +17,7 @@ export type CurrentUser = {
   provider: ProviderName;
   admin: boolean;
   profileComplete: boolean;
+  profileReviewed: boolean;
 };
 
 export type Offering = 'retail' | 'food' | 'service' | 'group' | 'entertainment';

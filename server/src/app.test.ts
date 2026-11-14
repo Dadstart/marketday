@@ -19,6 +19,7 @@ function person(overrides: Partial<CurrentUser> = {}): CurrentUser {
     provider: 'google',
     admin: false,
     profileComplete: true,
+    profileReviewed: true,
     ...overrides,
   };
 }
@@ -162,6 +163,10 @@ describe('access', () => {
     const blocked = await call(appFor(vendor), 'GET', '/events');
     assert.equal(blocked.status, 403);
     assert.match(blocked.body?.error ?? '', /vendor profile/);
+
+    const unreviewed = await call(appFor(person({ profileReviewed: false })), 'GET', '/events');
+    assert.equal(unreviewed.status, 403);
+    assert.match(unreviewed.body?.error ?? '', /vendor profile/);
 
     const listed = await call(
       appFor(admin, { listEvents: async () => [] }),

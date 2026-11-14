@@ -549,5 +549,6 @@ function normalizeUser(user: SessionUser): SessionUser {
     ...user,
     admin: user.admin === true,
     profileComplete: user.profileComplete === true,
+    profileReviewed: typeof user.profileReviewed === 'boolean' ? user.profileReviewed : user.profileComplete === true,
   };
 }

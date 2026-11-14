@@ -14,6 +14,7 @@ const vendor: CurrentUser = {
   provider: 'google',
   admin: true,
   profileComplete: true,
+  profileReviewed: true,
 };
 
 test('a session lasts seven days and administrator access follows the email address', async () => {
@@ -24,6 +25,7 @@ test('a session lasts seven days and administrator access follows the email addr
   assert.equal(verified.admin, false);
   assert.equal(verified.email, vendor.email);
   assert.equal(verified.profileComplete, false);
+  assert.equal(verified.profileReviewed, false);
 
   const admin = await signSession({ ...vendor, id: 'admin-1', email: 'Andrew@bishop4.com', admin: false });
   const verifiedAdmin = await verifySession(admin.token);

@@ -95,8 +95,9 @@ function Root() {
     }
   }
 
+  const needsProfile = Boolean(user && !user.admin && (!user.profileComplete || !user.profileReviewed));
   let screen = <PublicEventsScreen onViewingEvent={viewEvent} />;
-  if (user && !user.admin && !user.profileComplete) {
+  if (needsProfile) {
     screen = <VendorProfileScreen />;
   } else if (user) {
     screen = <EventsScreen initialEventId={resumeEventId} />;

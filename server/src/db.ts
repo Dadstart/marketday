@@ -48,10 +48,11 @@ type UserRow = {
   offering: string | null;
   products_and_services: string | null;
   facebook_name: string | null;
+  profile_reviewed_at?: string | null;
 };
 
 const userColumns =
-  'id, provider, email, name, picture, profile_completed_at, venmo, contact_person, business_name, phone, crosswinds_resident, offering, products_and_services, facebook_name';
+  'id, provider, email, name, picture, profile_completed_at, profile_reviewed_at, venmo, contact_person, business_name, phone, crosswinds_resident, offering, products_and_services, facebook_name';
 
 const eventColumns =
   'id, title, description, location, starts_at, ends_at, capacity, spaces_available, created_at';
@@ -206,7 +207,7 @@ async function findIdentityCandidates(identity: Identity): Promise<AccountLink[]
   return [...matches.values()];
 }
 
-async function insertUser(identity: Identity): Promise<CurrentUser | null> {
+async function insertUser(identity: Identity, columns = userColumns): Promise<CurrentUser | null> {
   const { data, error } = await supabase
     .from('users')
     .insert({
@@ -216,19 +217,22 @@ async function insertUser(identity: Identity): Promise<CurrentUser | null> {
       name: identity.name,
       picture: identity.picture,
     })
-    .select(userColumns)
+    .select(columns)
     .single();
 
+  if (error?.message.includes('profile_reviewed_at') && columns.includes('profile_reviewed_at')) {
+    return insertUser(identity, withoutColumn(columns, 'profile_reviewed_at'));
+  }
   if (error?.code === '23505') {
     return null;
   }
   if (error || !data) {
     throw databaseFailure(error?.message);
   }
-  return toCurrentUser(data as UserRow);
+  return toCurrentUser(data as unknown as UserRow);
 }
 
-async function updateUserIdentity(userId: string, identity: Identity): Promise<CurrentUser | null> {
+async function updateUserIdentity(userId: string, identity: Identity, columns = userColumns): Promise<CurrentUser | null> {
   const { data, error } = await supabase
     .from('users')
     .update({
@@ -240,16 +244,19 @@ async function updateUserIdentity(userId: string, identity: Identity): Promise<C
       updated_at: new Date().toISOString(),
     })
     .eq('id', userId)
-    .select(userColumns)
+    .select(columns)
     .single();
 
+  if (error?.message.includes('profile_reviewed_at') && columns.includes('profile_reviewed_at')) {
+    return updateUserIdentity(userId, identity, withoutColumn(columns, 'profile_reviewed_at'));
+  }
   if (error?.code === '23505') {
     return null;
   }
   if (error || !data) {
     throw databaseFailure(error?.message);
   }
-  return toCurrentUser(data as UserRow);
+  return toCurrentUser(data as unknown as UserRow);
 }
 
 function pickSurvivor(candidates: AccountLink[]): AccountLink {
@@ -386,16 +393,24 @@ function exactIlike(value: string): string {
   return value.replace(/%/g, '\\%');
 }
 
-export async function getUserById(userId: string): Promise<CurrentUser | null> {
-  const { data, error } = await supabase.from('users').select(userColumns).eq('id', userId).maybeSingle();
-  if (error) {
-    throw databaseFailure(error.message);
+async function readUserRow(columns: string, userId: string): Promise<UserRow | null> {
+  const selected = await supabase.from('users').select(columns).eq('id', userId).maybeSingle();
+  if (!selected.error) {
+    return (selected.data as UserRow | null) ?? null;
   }
-  return data ? toCurrentUser(data as UserRow) : null;
+  if (selected.error.message.includes('profile_reviewed_at') && columns.includes('profile_reviewed_at')) {
+    return readUserRow(withoutColumn(columns, 'profile_reviewed_at'), userId);
+  }
+  throw databaseFailure(selected.error.message);
+}
+
+export async function getUserById(userId: string): Promise<CurrentUser | null> {
+  const row = await readUserRow(userColumns, userId);
+  return row ? toCurrentUser(row) : null;
 }
 
 export async function saveVendorProfile(userId: string, input: VendorProfileInput): Promise<CurrentUser> {
-  const saved = await updateProfile(userId, input);
+  const saved = await updateProfile(userId, input, undefined, true);
   return toCurrentUser(saved);
 }
 
@@ -404,7 +419,7 @@ export async function saveAdminAccount(
   input: VendorProfileInput,
   adminNotes: string | null,
 ): Promise<void> {
-  await updateProfile(userId, input, adminNotes);
+  await updateProfile(userId, input, adminNotes, false);
 }
 
 export async function createAdminAccount(input: { name: string; email: string }): Promise<AccountDetail> {
@@ -439,7 +454,8 @@ async function insertAdminAccount(
   throw databaseFailure(inserted.error?.message);
 }
 
-function profileUpdate(input: VendorProfileInput, options: { image: boolean; optOut: boolean }) {
+function profileUpdate(input: VendorProfileInput, options: { image: boolean; optOut: boolean; reviewed: boolean }) {
+  const reviewedAt = new Date().toISOString();
   return {
     venmo: input.venmo,
     contact_person: input.contactPerson,
@@ -451,30 +467,40 @@ function profileUpdate(input: VendorProfileInput, options: { image: boolean; opt
     facebook_name: input.facebookName,
     ...(options.image ? { branding_image: input.brandingImage } : {}),
     ...(options.optOut ? { email_opt_out: input.emailOptOut } : {}),
-    profile_completed_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
+    profile_completed_at: reviewedAt,
+    ...(options.reviewed ? { profile_reviewed_at: reviewedAt } : {}),
+    updated_at: reviewedAt,
   };
 }
 
-async function updateProfile(userId: string, input: VendorProfileInput, adminNotes?: string | null): Promise<UserRow> {
-  return writeProfile(userId, input, adminNotes, { image: true, optOut: true });
+async function updateProfile(
+  userId: string,
+  input: VendorProfileInput,
+  adminNotes?: string | null,
+  reviewed = false,
+): Promise<UserRow> {
+  return writeProfile(userId, input, adminNotes, { image: true, optOut: true, reviewed });
 }
 
 async function writeProfile(
   userId: string,
   input: VendorProfileInput,
   adminNotes: string | null | undefined,
-  options: { image: boolean; optOut: boolean },
+  options: { image: boolean; optOut: boolean; reviewed: boolean },
+  columns = userColumns,
 ): Promise<UserRow> {
   const extra = adminNotes === undefined ? {} : { admin_notes: adminNotes };
   const saved = await supabase
     .from('users')
     .update({ ...profileUpdate(input, options), ...extra })
     .eq('id', userId)
-    .select(userColumns)
+    .select(columns)
     .single();
   if (!saved.error && saved.data) {
-    return saved.data as UserRow;
+    return saved.data as unknown as UserRow;
+  }
+  if (saved.error?.message.includes('profile_reviewed_at') && columns.includes('profile_reviewed_at')) {
+    return writeProfile(userId, input, adminNotes, { ...options, reviewed: false }, withoutColumn(columns, 'profile_reviewed_at'));
   }
   if (options.optOut && saved.error?.message.includes('email_opt_out')) {
     if (input.emailOptOut) {
@@ -1563,6 +1589,7 @@ function isProfileComplete(row: {
 }
 
 function toCurrentUser(row: UserRow): CurrentUser {
+  const profileComplete = isProfileComplete(row);
   return {
     id: row.id,
     email: row.email,
@@ -1570,7 +1597,8 @@ function toCurrentUser(row: UserRow): CurrentUser {
     picture: row.picture,
     provider: row.provider,
     admin: isAdminEmail(row.email),
-    profileComplete: isProfileComplete(row),
+    profileComplete,
+    profileReviewed: row.profile_reviewed_at === undefined ? profileComplete : row.profile_reviewed_at != null,
   };
 }
 

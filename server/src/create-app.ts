@@ -243,7 +243,7 @@ export function createApp(deps: AppServices) {
 
   const requireProfile: MiddlewareHandler<{ Variables: AppVariables }> = async (c, next) => {
     const user = c.get('user');
-    if (!user.admin && !user.profileComplete) {
+    if (!user.admin && (!user.profileComplete || !user.profileReviewed)) {
       throw new HttpError(403, 'Finish your vendor profile before continuing.');
     }
     await next();

@@ -13,6 +13,7 @@ export type SessionUser = {
   provider: AuthProviderName;
   admin: boolean;
   profileComplete: boolean;
+  profileReviewed: boolean;
 };
 
 export type StoredSession = {
