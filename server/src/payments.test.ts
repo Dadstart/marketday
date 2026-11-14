@@ -8,7 +8,16 @@ import {
   planChargeRefund,
   shouldExpireOpenCheckout,
 } from './checkout.js';
-import { DeliveryStopped, deliverVendorEmails, isFatalSesError, missingSesSettings, SES_NOT_CONFIGURED, vendorEmailInput } from './mail.js';
+import {
+  DeliveryStopped,
+  deliverVendorEmails,
+  EMAILS_PER_SECOND,
+  isFatalSesError,
+  missingSesSettings,
+  SES_NOT_CONFIGURED,
+  vendorEmailInput,
+  type EmailSendProgress,
+} from './mail.js';
 
 const owned = { registrationId: 'reg-1', userId: 'user-1', eventId: 'event-1' };
 
@@ -95,17 +104,88 @@ describe('outbound email', () => {
     assert.deepEqual(result.failed, [{ email: 'grace@example.com', error: 'Address not verified.' }]);
   });
 
+  test('sends at most 10 emails in each second', async () => {
+    let now = 5_000;
+    const slept: number[] = [];
+    const recipients = Array.from({ length: EMAILS_PER_SECOND + 2 }, (_, index) => ({ email: `v${index}@example.com` }));
+    const sent: string[] = [];
+    const result = await deliverVendorEmails(
+      recipients,
+      async (email) => {
+        sent.push(email);
+        if (email === 'v3@example.com') {
+          throw Object.assign(new Error('Address not verified.'), { name: 'MessageRejected' });
+        }
+      },
+      {
+        now: () => now,
+        sleep: async (ms) => {
+          slept.push(ms);
+          now += ms;
+        },
+      },
+    );
+    assert.deepEqual(slept, [1000]);
+    assert.equal(sent.length, EMAILS_PER_SECOND + 2);
+    assert.equal(sent[EMAILS_PER_SECOND], `v${EMAILS_PER_SECOND}@example.com`);
+    assert.equal(result.sent, EMAILS_PER_SECOND + 1);
+    assert.deepEqual(result.failed, [{ email: 'v3@example.com', error: 'Address not verified.' }]);
+  });
+
+  test('reports each address as it is sent, including ones that bounce', async () => {
+    const updates: EmailSendProgress[] = [];
+    const result = await deliverVendorEmails(
+      message.recipients,
+      async (email) => {
+        if (email === 'grace@example.com') {
+          throw Object.assign(new Error('Mailbox does not exist.'), { name: 'MessageRejected' });
+        }
+      },
+      {
+        onProgress: (progress) => {
+          updates.push(progress);
+        },
+      },
+    );
+    assert.deepEqual(updates[0], {
+      total: 2,
+      sent: 1,
+      failed: [],
+      done: false,
+      latest: { email: 'ada@example.com', status: 'sent', error: '' },
+    });
+    assert.deepEqual(updates[1], {
+      total: 2,
+      sent: 1,
+      failed: [{ email: 'grace@example.com', error: 'Mailbox does not exist.' }],
+      done: false,
+      latest: { email: 'grace@example.com', status: 'failed', error: 'Mailbox does not exist.' },
+    });
+    assert.equal(result.sent, 1);
+    assert.deepEqual(result.failed, updates[1]?.failed);
+  });
+
   test('stops the whole send when the account itself cannot send', async () => {
     const sent: string[] = [];
+    const updates: EmailSendProgress[] = [];
     await assert.rejects(
       () =>
-        deliverVendorEmails(message.recipients, async (email) => {
-          sent.push(email);
-          throw Object.assign(new Error('Sending is paused.'), { name: 'AccountSendingPausedException' });
-        }),
+        deliverVendorEmails(
+          message.recipients,
+          async (email) => {
+            sent.push(email);
+            throw Object.assign(new Error('Sending is paused.'), { name: 'AccountSendingPausedException' });
+          },
+          {
+            onProgress: (progress) => {
+              updates.push(progress);
+            },
+          },
+        ),
       (error: unknown) => error instanceof DeliveryStopped && error.message === 'Sending is paused.',
     );
     assert.deepEqual(sent, ['ada@example.com']);
+    assert.deepEqual(updates[0]?.latest, { email: 'ada@example.com', status: 'failed', error: 'Sending is paused.' });
     assert.equal(isFatalSesError('AccessDeniedException'), true);
     assert.equal(isFatalSesError('MessageRejected'), false);
   });

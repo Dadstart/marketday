@@ -157,7 +157,7 @@ export function VendorProfileScreen({
         <Text style={styles.intro}>
           {editing
             ? 'Update the business details used for your market registration.'
-            : 'We need these details the first time you sign in, before you can register for a market.'}
+            : 'Review these details and save them before you continue. A finished profile is required the first time you sign in.'}
         </Text>
         <ReadOnly label="Name" value={user?.name || '—'} />
         <ReadOnly label="Email" value={user?.email || '—'} />

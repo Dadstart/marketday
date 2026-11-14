@@ -82,25 +82,94 @@ function errorMessage(error: unknown): string {
   return 'Amazon SES could not send that email.';
 }
 
+export const EMAILS_PER_SECOND = 10;
+
+export type EmailFailure = { email: string; error: string };
+
+export type EmailAttempt = {
+  email: string;
+  status: 'sent' | 'failed';
+  error: string;
+};
+
+export type EmailSendProgress = {
+  total: number;
+  sent: number;
+  failed: EmailFailure[];
+  done: boolean;
+  error?: string;
+  latest?: EmailAttempt;
+};
+
+type EmailPace = {
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
+  onProgress?: (progress: EmailSendProgress) => Promise<void> | void;
+};
+
+type EmailWindow = { start: number; used: number };
+
+const sharedWindow: EmailWindow = { start: -1, used: 0 };
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function takeEmailSlot(window: EmailWindow, now: () => number, sleep: (ms: number) => Promise<void>): Promise<void> {
+  const time = now();
+  if (window.start < 0 || time - window.start >= 1000) {
+    window.start = time;
+    window.used = 0;
+  }
+  if (window.used >= EMAILS_PER_SECOND) {
+    const wait = window.start + 1000 - time;
+    if (wait > 0) {
+      await sleep(wait);
+    }
+    window.start = now();
+    window.used = 0;
+  }
+  window.used += 1;
+}
+
 export async function deliverVendorEmails(
   recipients: { email: string }[],
   send: (email: string) => Promise<void>,
-): Promise<{ sent: number; failed: { email: string; error: string }[] }> {
-  const failed: { email: string; error: string }[] = [];
+  pace: EmailPace = {},
+): Promise<{ sent: number; failed: EmailFailure[] }> {
+  const now = pace.now ?? Date.now;
+  const sleep = pace.sleep ?? delay;
+  const window = pace.now ? { start: -1, used: 0 } : sharedWindow;
+  const failed: EmailFailure[] = [];
   let sent = 0;
+  const total = recipients.length;
   for (const recipient of recipients) {
+    await takeEmailSlot(window, now, sleep);
+    let latest: EmailSendProgress['latest'];
     try {
       await send(recipient.email);
       sent += 1;
+      latest = { email: recipient.email, status: 'sent', error: '' };
     } catch (error) {
       if (error instanceof DeliveryStopped) {
         throw error;
       }
+      const message = errorMessage(error);
       if (isFatalSesError(errorName(error))) {
-        throw new DeliveryStopped(errorMessage(error));
+        failed.push({ email: recipient.email, error: message });
+        await pace.onProgress?.({
+          total,
+          sent,
+          failed: [...failed],
+          done: false,
+          latest: { email: recipient.email, status: 'failed', error: message },
+        });
+        throw new DeliveryStopped(message);
       }
-      failed.push({ email: recipient.email, error: errorMessage(error) });
+      failed.push({ email: recipient.email, error: message });
+      latest = { email: recipient.email, status: 'failed', error: message };
     }
+    await pace.onProgress?.({ total, sent, failed: [...failed], done: false, latest });
   }
   return { sent, failed };
 }

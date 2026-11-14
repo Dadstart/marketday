@@ -17,7 +17,9 @@ import {
   confirmCheckout,
   createEvent,
   deleteEvent,
+  downloadEmailLog,
   fetchEmailAudiences,
+  fetchEmailLog,
   fetchEvent,
   fetchEvents,
   markRegistrationPaid,
@@ -27,6 +29,8 @@ import {
   type EmailAudience,
   type EmailAudienceCounts,
   type EmailImage,
+  type EmailLogSummary,
+  type EmailSendProgress,
   unregisterFromEvent,
   updateEvent,
   updateRegistrationSpaces,
@@ -932,10 +936,13 @@ function EmailVendors({ token, eventId }: { token: string; eventId: string }) {
   const [images, setImages] = useState<EmailImage[]>([]);
   const [addresses, setAddresses] = useState('');
   const [counts, setCounts] = useState<EmailAudienceCounts | null>(null);
+  const [log, setLog] = useState<EmailLogSummary | null>(null);
+  const [downloading, setDownloading] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<string | null>(null);
+  const [progress, setProgress] = useState<EmailSendProgress | null>(null);
 
   useEffect(() => {
     if (!open) {
@@ -946,6 +953,17 @@ function EmailVendors({ token, eventId }: { token: string; eventId: string }) {
       .then((next) => {
         if (active) {
           setCounts(next);
+        }
+      })
+      .catch((reason: unknown) => {
+        if (active) {
+          setError(messageFrom(reason));
+        }
+      });
+    fetchEmailLog(token, eventId)
+      .then((next) => {
+        if (active) {
+          setLog(next);
         }
       })
       .catch((reason: unknown) => {
@@ -966,6 +984,7 @@ function EmailVendors({ token, eventId }: { token: string; eventId: string }) {
     setBusy(true);
     setError(null);
     setResult(null);
+    setProgress({ total: count ?? 0, sent: 0, failed: [], done: false });
     try {
       const sent = await sendEventEmail(
         token,
@@ -975,12 +994,16 @@ function EmailVendors({ token, eventId }: { token: string; eventId: string }) {
         message.trim(),
         images.filter((image) => message.includes(`cid:${image.id}`)),
         addresses,
+        setProgress,
       );
-      const failed = sent.failed.length === 0 ? '' : ` ${sent.failed.length} could not be sent.`;
+      const failed = sent.failed.length === 0 ? '' : ` ${sent.failed.length} could not be delivered.`;
       setResult(`Sent to ${sent.sent} ${recipientNoun(audience, sent.sent)}.${failed}`);
-      if (sent.failed.length > 0) {
-        setError(sent.failed.map((item) => `${item.email}: ${item.error}`).join('\n'));
-      }
+      setProgress((current) => ({
+        total: current?.total && current.total > 0 ? current.total : sent.sent + sent.failed.length,
+        sent: sent.sent,
+        failed: sent.failed,
+        done: true,
+      }));
       setConfirming(false);
       setSubject('');
       setMessage('');
@@ -988,8 +1011,26 @@ function EmailVendors({ token, eventId }: { token: string; eventId: string }) {
     } catch (reason) {
       setError(messageFrom(reason));
       setConfirming(false);
+      setProgress((current) => (current && (current.sent > 0 || current.failed.length > 0) ? { ...current, done: true } : null));
     } finally {
       setBusy(false);
+      try {
+        setLog(await fetchEmailLog(token, eventId));
+      } catch (reason) {
+        setError(messageFrom(reason));
+      }
+    }
+  }
+
+  async function downloadLog() {
+    setDownloading(true);
+    setError(null);
+    try {
+      await downloadEmailLog(token, eventId);
+    } catch (reason) {
+      setError(messageFrom(reason));
+    } finally {
+      setDownloading(false);
     }
   }
 
@@ -1028,6 +1069,17 @@ function EmailVendors({ token, eventId }: { token: string; eventId: string }) {
               </Pressable>
             );
           })}
+          <Text style={styles.muted}>{emailLogLabel(log)}</Text>
+          <Pressable
+            accessibilityRole="button"
+            disabled={busy || downloading}
+            onPress={() => {
+              void downloadLog();
+            }}
+            style={[pointer, (busy || downloading) && styles.disabled]}
+          >
+            <Text style={styles.back}>{downloading ? 'Preparing download…' : 'Download email log'}</Text>
+          </Pressable>
           {audience === 'vendors' ? (
             <Text style={styles.muted}>Archived users and people who opted out of email are not included.</Text>
           ) : null}
@@ -1067,6 +1119,9 @@ function EmailVendors({ token, eventId }: { token: string; eventId: string }) {
           />
           {addressProblem ? <Text style={styles.warning}>{addressProblem}</Text> : null}
           {audience !== 'addresses' && count === 0 ? <Text style={styles.muted}>No vendors match that choice.</Text> : null}
+          {progress && (busy || progress.sent > 0 || progress.failed.length > 0) ? (
+            <EmailSendStatus progress={progress} busy={busy} />
+          ) : null}
           {error ? <ErrorText message={error} /> : null}
           {result ? <Text style={styles.paidLabel}>{result}</Text> : null}
           {confirming && count != null && count > 0 ? (
@@ -1091,8 +1146,61 @@ function EmailVendors({ token, eventId }: { token: string; eventId: string }) {
               pointer,
             ]}
           >
-            <Text style={styles.primaryLabel}>{busy ? 'Sending…' : confirming ? 'Send email' : 'Review'}</Text>
+            <Text style={styles.primaryLabel}>
+              {busy
+                ? progress && progress.total > 0
+                  ? `Sending ${progress.sent + progress.failed.length} of ${progress.total}…`
+                  : 'Sending…'
+                : confirming
+                  ? 'Send email'
+                  : 'Review'}
+            </Text>
           </Pressable>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function emailLogLabel(log: EmailLogSummary | null): string {
+  if (!log) {
+    return 'Saved sends for this event can be downloaded.';
+  }
+  const total = log.sent + log.failed;
+  if (total === 0) {
+    return 'No emails have been saved for this event yet.';
+  }
+  const delivered = log.sent === 1 ? '1 delivered' : `${log.sent} delivered`;
+  const missed = log.failed === 1 ? '1 not delivered' : `${log.failed} not delivered`;
+  return `${delivered}, ${missed}.`;
+}
+
+function EmailSendStatus({ progress, busy }: { progress: EmailSendProgress; busy: boolean }) {
+  const finished = progress.sent + progress.failed.length;
+  const percent = progress.total > 0 ? Math.min(100, Math.round((finished / progress.total) * 100)) : 0;
+  return (
+    <View accessibilityLiveRegion="polite" style={styles.emailProgress}>
+      {busy ? (
+        <View style={styles.progressRow}>
+          <ActivityIndicator color={colors.accent} />
+          <Text style={styles.choiceLabel}>{progress.total > 0 ? `Sending ${finished} of ${progress.total}…` : 'Sending…'}</Text>
+        </View>
+      ) : null}
+      {busy && progress.total > 0 ? (
+        <View style={styles.progressTrack}>
+          <View style={[styles.progressFill, { width: `${percent}%` }]} />
+        </View>
+      ) : null}
+      {progress.failed.length > 0 ? (
+        <View style={styles.failureList}>
+          <Text style={styles.warning}>
+            {progress.failed.length === 1 ? '1 email was not delivered.' : `${progress.failed.length} emails were not delivered.`}
+          </Text>
+          {progress.failed.map((item, index) => (
+            <Text key={`${item.email}-${index}`} style={styles.failureItem}>
+              {item.email}: {item.error}
+            </Text>
+          ))}
         </View>
       ) : null}
     </View>
@@ -1615,6 +1723,35 @@ const styles = StyleSheet.create({
   },
   emailForm: {
     gap: 10,
+  },
+  emailProgress: {
+    gap: 8,
+  },
+  progressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  progressTrack: {
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: colors.line,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: colors.accent,
+  },
+  failureList: {
+    gap: 4,
+    backgroundColor: colors.dangerBackground,
+    borderRadius: 12,
+    padding: 12,
+  },
+  failureItem: {
+    color: colors.danger,
+    fontSize: 14,
+    lineHeight: 20,
   },
   error: {
     color: colors.danger,

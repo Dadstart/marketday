@@ -4,7 +4,7 @@ import { describe, test } from 'node:test';
 import { parseAddressList } from '../../client/src/email/addresses.js';
 import { createApp, type AppServices } from './create-app.js';
 import { DatabaseError, SesError } from './errors.js';
-import type { EmailMessage } from './mail.js';
+import type { EmailMessage, EmailSendProgress } from './mail.js';
 import type { CurrentUser, EventRecord } from './types.js';
 
 const future = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -19,6 +19,7 @@ function person(overrides: Partial<CurrentUser> = {}): CurrentUser {
     provider: 'google',
     admin: false,
     profileComplete: true,
+    profileReviewed: true,
     ...overrides,
   };
 }
@@ -66,6 +67,7 @@ function services(overrides: Partial<AppServices>): AppServices {
     getVendorProfile: missing('getVendorProfile'),
     saveVendorProfile: missing('saveVendorProfile'),
     listAccounts: missing('listAccounts'),
+    listAccountDetails: missing('listAccountDetails'),
     getAccount: missing('getAccount'),
     setAccountArchived: missing('setAccountArchived'),
     setEmailOptOut: missing('setEmailOptOut'),
@@ -90,6 +92,10 @@ function services(overrides: Partial<AppServices>): AppServices {
     markRegistrationPaidByAdmin: missing('markRegistrationPaidByAdmin'),
     emailAudienceCounts: missing('emailAudienceCounts'),
     listEmailRecipients: missing('listEmailRecipients'),
+    assertEmailLog: async () => {},
+    lookupVendorNames: async () => ({}),
+    recordEmailDelivery: async () => {},
+    listEmailDeliveries: missing('listEmailDeliveries'),
     sendVendorEmails: missing('sendVendorEmails'),
     getEventMap: missing('getEventMap'),
     saveEventVolunteers: missing('saveEventVolunteers'),
@@ -157,6 +163,10 @@ describe('access', () => {
     const blocked = await call(appFor(vendor), 'GET', '/events');
     assert.equal(blocked.status, 403);
     assert.match(blocked.body?.error ?? '', /vendor profile/);
+
+    const unreviewed = await call(appFor(person({ profileReviewed: false })), 'GET', '/events');
+    assert.equal(unreviewed.status, 403);
+    assert.match(unreviewed.body?.error ?? '', /vendor profile/);
 
     const listed = await call(
       appFor(admin, { listEvents: async () => [] }),
@@ -277,6 +287,43 @@ describe('access', () => {
       { body: { archived: false } },
     );
     assert.equal(missingUser.status, 404);
+  });
+
+  test('an administrator can download every user and all of their saved details', async () => {
+    const app = appFor(admin, {
+      listAccountDetails: async () => [
+        {
+          id: 'user-2',
+          name: 'Ada',
+          email: 'ada@example.com',
+          businessName: 'Analytical Engines',
+          profileComplete: true,
+          brandingImage: 'data:image/png;base64,abc',
+          archived: true,
+          emailOptOut: false,
+          provider: 'google',
+          venmo: 'ada',
+          contactPerson: 'Ada',
+          phone: '5555550100',
+          crosswindsResident: false,
+          offering: 'food',
+          productsAndServices: 'Pastries',
+          facebookName: 'ada',
+          adminNotes: 'Booth A',
+          createdAt: future,
+          updatedAt: future,
+        },
+      ],
+    });
+    const response = await app.request('/admin/users.csv', { headers: { authorization: 'Bearer session' } });
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('content-type') ?? '', /text\/csv/);
+    assert.match(response.headers.get('content-disposition') ?? '', /users\.csv/);
+    const csv = await response.text();
+    assert.match(csv, /Name,Email,Business name,/);
+    assert.match(csv, /Ada,ada@example.com,Analytical Engines,Ada,5555550100,ada,No,Food,Pastries,ada,Booth A,Yes,Send them,Yes,Google/);
+    assert.equal(csv.includes('base64'), false);
+    assert.equal((await call(appFor(person()), 'GET', '/admin/users.csv')).status, 403);
   });
 
   test('anyone can browse events, and registering still requires a sign-in', async () => {
@@ -781,5 +828,141 @@ describe('emailing vendors', () => {
     });
     assert.equal(response.status, 503);
     assert.match(response.body?.error ?? '', /SES_FROM_EMAIL/);
+  });
+
+  test('streams progress and keeps every address that could not be delivered', async () => {
+    const failed = [{ email: 'grace@example.com', error: 'Mailbox does not exist.' }];
+    const app = appFor(admin, {
+      emailAudienceCounts: async () => ({ vendors: 2, registered: 2, unpaid: 0 }),
+      listEmailRecipients: async () => [
+        { name: 'Ada', email: 'ada@example.com' },
+        { name: 'Grace', email: 'grace@example.com' },
+      ],
+      sendVendorEmails: async (_input, onProgress) => {
+        await onProgress?.({ total: 2, sent: 1, failed: [], done: false });
+        await onProgress?.({ total: 2, sent: 1, failed, done: false });
+        return { sent: 1, failed };
+      },
+    });
+    const response = await app.request('/events/event-1/email', {
+      method: 'POST',
+      headers: { authorization: 'Bearer session', 'content-type': 'application/json' },
+      body: JSON.stringify({ audience: 'registered', subject: 'Hello', text: 'Hi' }),
+    });
+    assert.equal(response.status, 200);
+    const lines = (await response.text())
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as EmailSendProgress);
+    assert.equal(lines[0]?.sent, 1);
+    assert.deepEqual(lines[1]?.failed, failed);
+    assert.deepEqual(lines.at(-1), { total: 2, sent: 1, failed, done: true });
+  });
+
+  test('keeps earlier failures when sending has to stop', async () => {
+    const failed = [{ email: 'grace@example.com', error: 'Mailbox does not exist.' }];
+    const app = appFor(admin, {
+      emailAudienceCounts: async () => ({ vendors: 2, registered: 2, unpaid: 0 }),
+      listEmailRecipients: async () => [
+        { name: 'Grace', email: 'grace@example.com' },
+        { name: 'Ada', email: 'ada@example.com' },
+      ],
+      sendVendorEmails: async (_input, onProgress) => {
+        await onProgress?.({ total: 2, sent: 0, failed, done: false });
+        throw new SesError(502, 'Sending is paused.');
+      },
+    });
+    const response = await app.request('/events/event-1/email', {
+      method: 'POST',
+      headers: { authorization: 'Bearer session', 'content-type': 'application/json' },
+      body: JSON.stringify({ audience: 'registered', subject: 'Hello', text: 'Hi' }),
+    });
+    assert.equal(response.status, 200);
+    const lines = (await response.text())
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as EmailSendProgress);
+    assert.deepEqual(lines.at(-1), { total: 2, sent: 0, failed, done: true, error: 'Sending is paused.' });
+  });
+
+  test('saves every delivery and downloads a spreadsheet of the results', async () => {
+    const saved: { vendorName: string; email: string; status: string; result: string; subject: string }[] = [];
+    const rows = [
+      {
+        vendorName: 'Ada',
+        email: 'ada@example.com',
+        status: 'sent' as const,
+        result: 'Sent',
+        subject: 'Vendor map',
+        sentAt: '2026-11-12T18:00:00.000Z',
+      },
+      {
+        vendorName: 'Grace',
+        email: 'grace@example.com',
+        status: 'failed' as const,
+        result: 'Mailbox does not exist.',
+        subject: 'Vendor map',
+        sentAt: '2026-11-12T18:00:01.000Z',
+      },
+    ];
+    const app = appFor(admin, {
+      emailAudienceCounts: async () => ({ vendors: 2, registered: 2, unpaid: 0 }),
+      listEmailRecipients: async () => [
+        { name: 'Ada', email: 'ada@example.com' },
+        { name: 'Grace', email: 'grace@example.com' },
+      ],
+      recordEmailDelivery: async (row) => {
+        saved.push(row);
+      },
+      sendVendorEmails: async (_input, onProgress) => {
+        await onProgress?.({
+          total: 2,
+          sent: 1,
+          failed: [],
+          done: false,
+          latest: { email: 'ada@example.com', status: 'sent', error: '' },
+        });
+        await onProgress?.({
+          total: 2,
+          sent: 1,
+          failed: [{ email: 'grace@example.com', error: 'Mailbox does not exist.' }],
+          done: false,
+          latest: { email: 'grace@example.com', status: 'failed', error: 'Mailbox does not exist.' },
+        });
+        return { sent: 1, failed: [{ email: 'grace@example.com', error: 'Mailbox does not exist.' }] };
+      },
+      listEmailDeliveries: async () => rows,
+    });
+    const sent = await app.request('/events/event-1/email', {
+      method: 'POST',
+      headers: { authorization: 'Bearer session', 'content-type': 'application/json' },
+      body: JSON.stringify({ audience: 'registered', subject: 'Vendor map', text: 'The map is ready.' }),
+    });
+    assert.equal(sent.status, 200);
+    await sent.text();
+    assert.deepEqual(saved, [
+      { eventId: 'event-1', subject: 'Vendor map', vendorName: 'Ada', email: 'ada@example.com', status: 'sent', result: 'Sent' },
+      {
+        eventId: 'event-1',
+        subject: 'Vendor map',
+        vendorName: 'Grace',
+        email: 'grace@example.com',
+        status: 'failed',
+        result: 'Mailbox does not exist.',
+      },
+    ]);
+
+    const summary = await call(app, 'GET', '/events/event-1/email-log');
+    assert.equal(summary.status, 200);
+    assert.deepEqual(summary.body, { sent: 1, failed: 1 });
+
+    const csv = await app.request('/events/event-1/email-log.csv', { headers: { authorization: 'Bearer session' } });
+    assert.equal(csv.status, 200);
+    assert.match(csv.headers.get('content-type') ?? '', /text\/csv/);
+    const text = await csv.text();
+    assert.match(text, /Vendor name,Email,Status,Result,Subject,Sent at/);
+    assert.match(text, /Ada,ada@example.com,Sent,Sent,Vendor map/);
+    assert.match(text, /Grace,grace@example.com,Not delivered,Mailbox does not exist\./);
+    assert.equal((await call(appFor(person()), 'GET', '/events/event-1/email-log')).status, 403);
   });
 });

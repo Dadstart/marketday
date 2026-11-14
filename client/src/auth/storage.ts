@@ -79,6 +79,9 @@ function isStoredSession(value: unknown): value is StoredSession {
   if (typeof user.profileComplete !== 'boolean') {
     user.profileComplete = false;
   }
+  if (typeof user.profileReviewed !== 'boolean') {
+    user.profileReviewed = user.profileComplete;
+  }
   if (user.email != null && typeof user.email !== 'string') {
     return false;
   }

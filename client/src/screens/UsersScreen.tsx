@@ -3,6 +3,7 @@ import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, Text
 
 import {
   createAccount,
+  downloadUsers,
   fetchAccount,
   fetchAccounts,
   setAccountArchived,
@@ -45,7 +46,20 @@ export function AccountList({
 }) {
   const [users, setUsers] = useState<AccountSummary[] | null>(null);
   const [showArchived, setShowArchived] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  async function download() {
+    setDownloading(true);
+    setError(null);
+    try {
+      await downloadUsers(token);
+    } catch (reason) {
+      setError(messageFrom(reason));
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -78,14 +92,26 @@ export function AccountList({
             <Text style={styles.saveLabel}>Create user</Text>
           </Pressable>
         </View>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityState={{ selected: showArchived }}
-          onPress={() => setShowArchived((shown) => !shown)}
-          style={pointer}
-        >
-          <Text style={styles.back}>{showArchived ? 'Hide archived' : 'Show archived'}</Text>
-        </Pressable>
+        <View style={styles.links}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ selected: showArchived }}
+            onPress={() => setShowArchived((shown) => !shown)}
+            style={pointer}
+          >
+            <Text style={styles.back}>{showArchived ? 'Hide archived' : 'Show archived'}</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            disabled={downloading}
+            onPress={() => {
+              void download();
+            }}
+            style={[pointer, downloading && styles.disabled]}
+          >
+            <Text style={styles.back}>{downloading ? 'Preparing download…' : 'Download all users'}</Text>
+          </Pressable>
+        </View>
         {error ? <Text style={styles.error}>{error}</Text> : null}
         {users == null && !error ? <ActivityIndicator color={colors.accent} /> : null}
         {users?.length === 0 ? (
@@ -598,6 +624,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
+  },
+  links: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 16,
   },
   title: {
     ...serif,
