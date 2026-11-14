@@ -6,6 +6,7 @@ import type { CheckoutState, ConfirmedPayment } from './checkout.js';
 import { DatabaseError, PaymentError, SesError } from './errors.js';
 import { feeCents } from './fees.js';
 import { isEmailAudience, isMapArea, type EmailAudience } from './guards.js';
+import { accountsCsv } from './accounts-csv.js';
 import { emailLogCsv, emailLogSummary, type EmailLogRow } from './email-log.js';
 import type { EmailMessage, EmailSendProgress } from './mail.js';
 import {
@@ -40,6 +41,7 @@ export type AppServices = {
   getVendorProfile: (userId: string) => Promise<VendorProfileDraft | null>;
   saveVendorProfile: (userId: string, input: VendorProfileInput) => Promise<CurrentUser>;
   listAccounts: (includeArchived: boolean) => Promise<AccountSummary[]>;
+  listAccountDetails: () => Promise<Array<AccountDetail & { updatedAt: string }>>;
   getAccount: (userId: string) => Promise<AccountDetail | null>;
   setAccountArchived: (userId: string, archived: boolean) => Promise<AccountDetail | null>;
   setEmailOptOut: (userId: string, emailOptOut: boolean) => Promise<boolean>;
@@ -131,6 +133,7 @@ export function createApp(deps: AppServices) {
     getVendorProfile,
     saveVendorProfile,
     listAccounts,
+    listAccountDetails,
     getAccount,
     setAccountArchived,
     setEmailOptOut,
@@ -290,6 +293,14 @@ export function createApp(deps: AppServices) {
   app.get('/admin/users', async (c) => {
     const users = await listAccounts(c.req.query('includeArchived') === '1');
     return c.json({ users });
+  });
+
+  app.get('/admin/users.csv', async (c) => {
+    const users = await listAccountDetails();
+    return c.body(accountsCsv(users), 200, {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': 'attachment; filename="users.csv"',
+    });
   });
 
   app.post('/admin/users', async (c) => {

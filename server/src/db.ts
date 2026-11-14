@@ -755,6 +755,16 @@ export async function listAccounts(includeArchived = false): Promise<AccountSumm
   return rows.map(toAccountSummary);
 }
 
+export async function listAccountDetails(): Promise<Array<AccountDetail & { updatedAt: string }>> {
+  const rows = (await selectAccountList(`${accountDetailColumns}, updated_at`, true)) as unknown as Array<
+    AccountDetailRow & { updated_at?: string }
+  >;
+  return rows.map((row) => ({
+    ...accountDetailFrom(row),
+    updatedAt: row.updated_at ?? '',
+  }));
+}
+
 async function selectAccountList(columns: string, includeArchived: boolean): Promise<AccountSummaryRow[]> {
   const hideArchived = !includeArchived && columns.split(', ').includes('archived');
   const selected = await (hideArchived

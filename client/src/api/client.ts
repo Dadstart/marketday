@@ -341,12 +341,20 @@ export function fetchEmailLog(token: string, eventId: string): Promise<EmailLogS
   return request(`/events/${eventId}/email-log`, token);
 }
 
-export async function downloadEmailLog(token: string, eventId: string): Promise<void> {
+export function downloadEmailLog(token: string, eventId: string): Promise<void> {
+  return downloadCsv(token, `/events/${eventId}/email-log.csv`, 'email-log.csv');
+}
+
+export function downloadUsers(token: string): Promise<void> {
+  return downloadCsv(token, '/admin/users.csv', 'users.csv');
+}
+
+async function downloadCsv(token: string, path: string, filename: string): Promise<void> {
   const headers = new Headers();
   headers.set('Authorization', `Bearer ${token}`);
   let response: Response;
   try {
-    response = await fetch(`${API_URL}/events/${eventId}/email-log.csv`, { headers });
+    response = await fetch(`${API_URL}${path}`, { headers });
   } catch {
     throw new ApiError('The Community Day server is not running.', 0);
   }
@@ -358,12 +366,12 @@ export async function downloadEmailLog(token: string, eventId: string): Promise<
   }
   const csv = await response.text();
   if (typeof document === 'undefined') {
-    throw new ApiError('Download the email log from the web app.', 400);
+    throw new ApiError('Download the file from the web app.', 400);
   }
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
   const link = document.createElement('a');
   link.href = url;
-  link.download = 'email-log.csv';
+  link.download = filename;
   document.body.appendChild(link);
   link.click();
   link.remove();

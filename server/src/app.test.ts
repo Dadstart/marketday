@@ -66,6 +66,7 @@ function services(overrides: Partial<AppServices>): AppServices {
     getVendorProfile: missing('getVendorProfile'),
     saveVendorProfile: missing('saveVendorProfile'),
     listAccounts: missing('listAccounts'),
+    listAccountDetails: missing('listAccountDetails'),
     getAccount: missing('getAccount'),
     setAccountArchived: missing('setAccountArchived'),
     setEmailOptOut: missing('setEmailOptOut'),
@@ -281,6 +282,43 @@ describe('access', () => {
       { body: { archived: false } },
     );
     assert.equal(missingUser.status, 404);
+  });
+
+  test('an administrator can download every user and all of their saved details', async () => {
+    const app = appFor(admin, {
+      listAccountDetails: async () => [
+        {
+          id: 'user-2',
+          name: 'Ada',
+          email: 'ada@example.com',
+          businessName: 'Analytical Engines',
+          profileComplete: true,
+          brandingImage: 'data:image/png;base64,abc',
+          archived: true,
+          emailOptOut: false,
+          provider: 'google',
+          venmo: 'ada',
+          contactPerson: 'Ada',
+          phone: '5555550100',
+          crosswindsResident: false,
+          offering: 'food',
+          productsAndServices: 'Pastries',
+          facebookName: 'ada',
+          adminNotes: 'Booth A',
+          createdAt: future,
+          updatedAt: future,
+        },
+      ],
+    });
+    const response = await app.request('/admin/users.csv', { headers: { authorization: 'Bearer session' } });
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('content-type') ?? '', /text\/csv/);
+    assert.match(response.headers.get('content-disposition') ?? '', /users\.csv/);
+    const csv = await response.text();
+    assert.match(csv, /Name,Email,Business name,/);
+    assert.match(csv, /Ada,ada@example.com,Analytical Engines,Ada,5555550100,ada,No,Food,Pastries,ada,Booth A,Yes,Send them,Yes,Google/);
+    assert.equal(csv.includes('base64'), false);
+    assert.equal((await call(appFor(person()), 'GET', '/admin/users.csv')).status, 403);
   });
 
   test('anyone can browse events, and registering still requires a sign-in', async () => {
