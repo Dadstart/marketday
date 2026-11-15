@@ -9,6 +9,7 @@ import { isAdminEmail } from './admins.js';
 import { databaseFailure, DatabaseError } from './errors.js';
 import { feeCents, GUEST_FEE_CENTS, isBoothFee, RESIDENT_FEE_CENTS } from './fees.js';
 import { assertAssignableSpot, mapSpotLimit, mergeSpaceLists, uniqueRecipients } from './guards.js';
+import { profileFormComplete, profileFormError } from '../../client/src/profile/validate.js';
 import {
   parseAvailableSpaces,
   parseBrandingImage,
@@ -54,6 +55,45 @@ describe('vendor profiles', () => {
     productsAndServices: 'Prints',
     facebookName: '  ',
   };
+
+  test('the first-login form is incomplete until every required field is filled', () => {
+    assert.equal(
+      profileFormComplete({
+        venmo: '',
+        contactPerson: '',
+        businessName: '',
+        phone: '',
+        crosswindsResident: null,
+        offering: null,
+        productsAndServices: '',
+      }),
+      false,
+    );
+    assert.match(
+      profileFormError({
+        venmo: '@market',
+        contactPerson: 'Ada',
+        businessName: 'Engines',
+        phone: '5125551212',
+        crosswindsResident: true,
+        offering: null,
+        productsAndServices: 'Prints',
+      }) ?? '',
+      /offer/,
+    );
+    assert.equal(
+      profileFormComplete({
+        venmo: '@market',
+        contactPerson: 'Ada Lovelace',
+        businessName: 'Analytical Engines',
+        phone: '(512) 555-1212',
+        crosswindsResident: false,
+        offering: 'food',
+        productsAndServices: 'Tacos',
+      }),
+      true,
+    );
+  });
 
   test('trims text, accepts a phone with at least ten digits, and treats a blank Facebook name as empty', () => {
     const parsed = parseVendorProfile(profile);

@@ -454,7 +454,10 @@ async function insertAdminAccount(
   throw databaseFailure(inserted.error?.message);
 }
 
-function profileUpdate(input: VendorProfileInput, options: { image: boolean; optOut: boolean; reviewed: boolean }) {
+function profileUpdate(
+  input: VendorProfileInput,
+  options: { image: boolean; optOut: boolean; reviewed: boolean; trackReviewed: boolean },
+) {
   const reviewedAt = new Date().toISOString();
   return {
     venmo: input.venmo,
@@ -468,7 +471,13 @@ function profileUpdate(input: VendorProfileInput, options: { image: boolean; opt
     ...(options.image ? { branding_image: input.brandingImage } : {}),
     ...(options.optOut ? { email_opt_out: input.emailOptOut } : {}),
     profile_completed_at: reviewedAt,
-    ...(options.reviewed ? { profile_reviewed_at: reviewedAt } : {}),
+    // Only the vendor's own save counts as a first-login review. An administrator
+    // edit clears that flag so the person must open and save the profile themselves.
+    ...(options.trackReviewed
+      ? { profile_reviewed_at: options.reviewed ? reviewedAt : null }
+      : options.reviewed
+        ? { profile_reviewed_at: reviewedAt }
+        : {}),
     updated_at: reviewedAt,
   };
 }
@@ -490,9 +499,10 @@ async function writeProfile(
   columns = userColumns,
 ): Promise<UserRow> {
   const extra = adminNotes === undefined ? {} : { admin_notes: adminNotes };
+  const trackReviewed = columns.includes('profile_reviewed_at');
   const saved = await supabase
     .from('users')
-    .update({ ...profileUpdate(input, options), ...extra })
+    .update({ ...profileUpdate(input, { ...options, trackReviewed }), ...extra })
     .eq('id', userId)
     .select(columns)
     .single();

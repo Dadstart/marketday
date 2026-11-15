@@ -13,6 +13,7 @@ import {
   type AccountSummary,
   type VendorProfileInput,
 } from '../api/client';
+import { profileFormError } from '../profile/validate';
 import { colors, pointer, serif } from '../theme';
 import { BrandingImageField } from './BrandingImageField';
 
@@ -356,12 +357,20 @@ function AccountEditor({
   const [busy, setBusy] = useState(false);
 
   async function submit() {
-    if (crosswindsResident == null) {
-      setError('Say whether they are a Crosswinds resident.');
-      return;
-    }
-    if (!offering) {
-      setError('Choose what they will offer.');
+    const incomplete = profileFormError(
+      {
+        venmo,
+        contactPerson,
+        businessName,
+        phone,
+        crosswindsResident,
+        offering,
+        productsAndServices,
+      },
+      'they',
+    );
+    if (incomplete || crosswindsResident == null || !offering) {
+      setError(incomplete ?? 'Fill out every required field before you save.');
       return;
     }
     setBusy(true);
@@ -400,6 +409,9 @@ function AccountEditor({
         <Choice label="Don't email me" selected={emailOptOut} onPress={() => setEmailOptOut(true)} />
       </View>
       <Text style={styles.muted}>Name and email come from their Google or Microsoft account.</Text>
+      <Text style={styles.muted}>
+        Saving here does not finish their first sign-in. They still have to open and save the full profile themselves.
+      </Text>
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <Field label="Venmo account name or phone number" value={venmo} onChangeText={setVenmo} />
       <Field label="Contact person" value={contactPerson} onChangeText={setContactPerson} />
@@ -504,7 +516,7 @@ export function AccountCreateForm({
         </Text>
         <Text style={styles.muted}>
           They can sign in later with Google or Microsoft using this email. You can fill in their profile after the
-          account is created.
+          account is created. They still have to open and save the full profile the first time they sign in.
         </Text>
         {error ? <Text style={styles.error}>{error}</Text> : null}
         <Field label="Name" value={name} onChangeText={setName} />
