@@ -1,6 +1,6 @@
 # Community Day
 
-Sign in with a Google account or a Microsoft account. The first time you sign in, review and save your vendor profile before you can register. The same Expo app runs on the web, iOS, and Android.
+Sign in with a Google account or a Microsoft account. The first time you sign in, fill out and save your entire vendor profile before you can register. A profile an administrator enters still needs that first save from the vendor. The same Expo app runs on the web, iOS, and Android.
 
 ## Run it
 

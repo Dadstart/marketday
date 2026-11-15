@@ -4,6 +4,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, 
 import { fetchVendorProfile, saveVendorProfile, setMyEmailOptOut, type VendorProfileInput } from '../api/client';
 import { useAuth } from '../auth/AuthProvider';
 import { Logo } from '../Logo';
+import { profileFormComplete, profileFormError } from '../profile/validate';
 import { BrandingImageField } from './BrandingImageField';
 import { colors, pointer, serif } from '../theme';
 
@@ -95,16 +96,24 @@ export function VendorProfileScreen({
     }
   }
 
+  const formValues = {
+    venmo,
+    contactPerson,
+    businessName,
+    phone,
+    crosswindsResident,
+    offering,
+    productsAndServices,
+  };
+  const formReady = profileFormComplete(formValues);
+
   async function submit() {
     if (!token) {
       return;
     }
-    if (crosswindsResident == null) {
-      setError('Say whether you are a Crosswinds resident.');
-      return;
-    }
-    if (!offering) {
-      setError('Choose what you will offer.');
+    const incomplete = profileFormError(formValues);
+    if (incomplete || crosswindsResident == null || !offering) {
+      setError(incomplete ?? 'Fill out every required field before you continue.');
       return;
     }
 
@@ -157,7 +166,7 @@ export function VendorProfileScreen({
         <Text style={styles.intro}>
           {editing
             ? 'Update the business details used for your market registration.'
-            : 'Review these details and save them before you continue. A finished profile is required the first time you sign in.'}
+            : 'Fill out every required field and save before you continue. A complete profile is required the first time you sign in.'}
         </Text>
         <ReadOnly label="Name" value={user?.name || '—'} />
         <ReadOnly label="Email" value={user?.email || '—'} />
@@ -243,11 +252,16 @@ export function VendorProfileScreen({
         {error ? <Text style={styles.error}>{error}</Text> : null}
         <Pressable
           accessibilityRole="button"
-          disabled={busy || loading}
+          disabled={busy || loading || !formReady}
           onPress={() => {
             void submit();
           }}
-          style={({ pressed }) => [styles.save, (busy || loading) && styles.disabled, pressed && styles.pressed, pointer]}
+          style={({ pressed }) => [
+            styles.save,
+            (busy || loading || !formReady) && styles.disabled,
+            pressed && styles.pressed,
+            pointer,
+          ]}
         >
           <Text style={styles.saveLabel}>{busy ? 'Saving…' : editing ? 'Save changes' : 'Save and continue'}</Text>
         </Pressable>

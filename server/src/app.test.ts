@@ -168,6 +168,14 @@ describe('access', () => {
     assert.equal(unreviewed.status, 403);
     assert.match(unreviewed.body?.error ?? '', /vendor profile/);
 
+    const incompleteAndUnreviewed = await call(
+      appFor(person({ profileComplete: false, profileReviewed: false })),
+      'POST',
+      '/events/event-1/registrations',
+      { body: { spacesRequested: ['grass'] } },
+    );
+    assert.equal(incompleteAndUnreviewed.status, 403);
+
     const listed = await call(
       appFor(admin, { listEvents: async () => [] }),
       'GET',
@@ -177,6 +185,52 @@ describe('access', () => {
 
     const accounts = await call(appFor(person(), { listAccounts: async () => [] }), 'GET', '/admin/users');
     assert.equal(accounts.status, 403);
+  });
+
+  test('an incomplete vendor can save their profile, and a finished profile can list events', async () => {
+    const incomplete = person({ profileComplete: false, profileReviewed: false });
+    const finished = person({ profileComplete: true, profileReviewed: true });
+    let current = incomplete;
+    let saved = false;
+    const app = createApp({
+      ...services({
+        verifySession: async () => incomplete,
+        getUserById: async () => current,
+        saveVendorProfile: async () => {
+          saved = true;
+          current = finished;
+          return finished;
+        },
+        listEvents: async () => [],
+      }),
+    });
+    const profile = await call(app, 'PUT', '/me/profile', {
+      body: {
+        venmo: '@market',
+        contactPerson: 'Ada Lovelace',
+        businessName: 'Analytical Engines',
+        phone: '(512) 555-1212',
+        crosswindsResident: true,
+        offering: 'retail',
+        productsAndServices: 'Prints',
+        facebookName: null,
+        brandingImage: null,
+        emailOptOut: false,
+      },
+    });
+    assert.equal(profile.status, 200);
+    assert.equal(saved, true);
+    assert.equal(
+      (profile.body as { user?: { profileComplete?: boolean; profileReviewed?: boolean } } | null)?.user?.profileComplete,
+      true,
+    );
+    assert.equal(
+      (profile.body as { user?: { profileComplete?: boolean; profileReviewed?: boolean } } | null)?.user?.profileReviewed,
+      true,
+    );
+
+    const listed = await call(app, 'GET', '/events');
+    assert.equal(listed.status, 200);
   });
 
   test('an administrator can create a user from a name and email', async () => {
