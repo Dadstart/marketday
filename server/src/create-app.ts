@@ -414,8 +414,28 @@ export function createApp(deps: AppServices) {
   app.post('/events/:id/registrations', async (c) => {
     const body = await readJson(c);
     const spacesRequested = parseRequestedSpaces(body.spacesRequested);
-    await registerForEvent(c.req.param('id'), c.get('user').id, spacesRequested);
-    const result = await getEvent(c.req.param('id'), c.get('user'));
+    const eventId = c.req.param('id');
+    const actor = c.get('user');
+    const requestedUserId = typeof body.userId === 'string' ? body.userId.trim() : '';
+    let userId = actor.id;
+    if (requestedUserId && requestedUserId !== actor.id) {
+      if (!actor.admin) {
+        throw new HttpError(403, 'Only an administrator can register someone else.');
+      }
+      const account = await getAccount(requestedUserId);
+      if (!account) {
+        throw new HttpError(404, 'That user does not exist.');
+      }
+      if (account.archived) {
+        throw new HttpError(400, 'Restore that user before registering them.');
+      }
+      if (await getOwnedRegistration(eventId, requestedUserId)) {
+        throw new HttpError(409, 'That person is already registered for this event.');
+      }
+      userId = requestedUserId;
+    }
+    await registerForEvent(eventId, userId, spacesRequested);
+    const result = await getEvent(eventId, actor);
     if (!result) {
       throw new HttpError(404, 'That event does not exist.');
     }

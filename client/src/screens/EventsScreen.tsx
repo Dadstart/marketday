@@ -18,14 +18,17 @@ import {
   createEvent,
   deleteEvent,
   downloadEmailLog,
+  fetchAccounts,
   fetchEmailAudiences,
   fetchEmailLog,
   fetchEvent,
   fetchEvents,
   markRegistrationPaid,
   registerForEvent,
+  registerUserForEvent,
   sendEventEmail,
   startEventPayment,
+  type AccountSummary,
   type EmailAudience,
   type EmailAudienceCounts,
   type EmailImage,
@@ -624,6 +627,17 @@ function EventDetailView({
                 </View>
               ))
             )}
+            {admin ? (
+              <AdminRegistration
+                token={token}
+                eventId={event.id}
+                offered={event.spacesAvailable}
+                registeredUserIds={registrations.flatMap((registration) =>
+                  registration.userId ? [registration.userId] : [],
+                )}
+                onChanged={setDetail}
+              />
+            ) : null}
             {admin ? (
               confirmingDelete ? (
                 <View style={styles.deleteBox}>
@@ -1302,6 +1316,198 @@ function splitDateTime(value: string | null | undefined): { date: string; time: 
     date: `${parsed.getFullYear()}-${month}-${day}`,
     time: `${hours}:${minutes}`,
   };
+}
+
+function AdminRegistration({
+  token,
+  eventId,
+  offered,
+  registeredUserIds,
+  onChanged,
+}: {
+  token: string;
+  eventId: string;
+  offered: RegistrationSummary['spacesRequested'];
+  registeredUserIds: string[];
+  onChanged: (detail: EventDetail) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [users, setUsers] = useState<AccountSummary[] | null>(null);
+  const [query, setQuery] = useState('');
+  const [userId, setUserId] = useState<string | null>(null);
+  const [spaces, setSpaces] = useState<RegistrationSummary['spacesRequested']>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const choices = SPACE_OPTIONS.filter((option) => offered.includes(option.id));
+  const registered = new Set(registeredUserIds);
+  const eligible = (users ?? []).filter((account) => !account.archived && !registered.has(account.id));
+  const typed = query.trim().toLowerCase();
+  const matches =
+    typed.length >= 2
+      ? eligible.filter((account) => userSearchText(account).includes(typed)).slice(0, 12)
+      : eligible.length <= 8
+        ? eligible
+        : [];
+  const selected = eligible.find((account) => account.id === userId) ?? null;
+  const visible = selected ? [selected, ...matches.filter((account) => account.id !== selected.id)] : matches;
+
+  useEffect(() => {
+    if (!open || users) {
+      return;
+    }
+    let active = true;
+    fetchAccounts(token)
+      .then((body) => {
+        if (active) {
+          setUsers(body.users);
+        }
+      })
+      .catch((reason: unknown) => {
+        if (active) {
+          setUsers([]);
+          setError(messageFrom(reason));
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [open, token, users]);
+
+  function setCount(id: RegistrationSummary['spacesRequested'][number], count: number) {
+    const next = Math.max(0, Math.min(MAX_SPACES, count));
+    setSpaces((current) => [...current.filter((item) => item !== id), ...Array.from({ length: next }, () => id)]);
+  }
+
+  async function register() {
+    if (!userId) {
+      setError('Choose a user.');
+      return;
+    }
+    if (spaces.length === 0) {
+      setError('Choose at least one space.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      onChanged(await registerUserForEvent(token, eventId, userId, spaces));
+      setOpen(false);
+      setQuery('');
+      setUserId(null);
+      setSpaces([]);
+    } catch (reason) {
+      setError(messageFrom(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <View style={styles.emailBox}>
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => {
+          setOpen((shown) => !shown);
+          setError(null);
+        }}
+        style={pointer}
+      >
+        <Text style={styles.back}>{open ? 'Close registration' : 'Register a user'}</Text>
+      </Pressable>
+      {open ? (
+        <View style={styles.emailForm}>
+          <Text style={styles.muted}>The booth fee stays due until you mark it paid.</Text>
+          <Field
+            label="Find a user"
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Name or email"
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          {users == null && !error ? <ActivityIndicator color={colors.accent} /> : null}
+          {users && eligible.length === 0 && !error ? (
+            <Text style={styles.muted}>Everyone is already registered.</Text>
+          ) : null}
+          {users && eligible.length > 8 && typed.length < 2 ? (
+            <Text style={styles.muted}>Type at least two letters to find a user.</Text>
+          ) : null}
+          {typed.length >= 2 && matches.length === 0 && !selected ? (
+            <Text style={styles.muted}>No user matches that.</Text>
+          ) : null}
+          {visible.map((account) => {
+            const chosen = account.id === userId;
+            return (
+              <Pressable
+                key={account.id}
+                accessibilityRole="button"
+                accessibilityState={{ selected: chosen }}
+                onPress={() => {
+                  setUserId(account.id);
+                  setError(null);
+                }}
+                style={[styles.choice, chosen && styles.choiceSelected, pointer]}
+              >
+                <Text style={styles.choiceLabel}>{account.name}</Text>
+                <Text style={styles.muted}>{account.email}</Text>
+                {account.businessName ? <Text style={styles.muted}>{account.businessName}</Text> : null}
+              </Pressable>
+            );
+          })}
+          {choices.length === 0 ? <Text style={styles.muted}>No spaces are available for this event.</Text> : null}
+          {choices.map((option) => {
+            const count = spaces.filter((id) => id === option.id).length;
+            return (
+              <View key={option.id} style={styles.quantityRow}>
+                <Text style={styles.choiceLabel}>{option.label}</Text>
+                <View style={styles.quantityControls}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Fewer ${option.label}`}
+                    disabled={count === 0 || busy}
+                    onPress={() => setCount(option.id, count - 1)}
+                    style={[styles.quantityButton, (count === 0 || busy) && styles.disabled, pointer]}
+                  >
+                    <Text style={styles.quantityButtonLabel}>−</Text>
+                  </Pressable>
+                  <Text style={styles.quantityCount}>{count}</Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`More ${option.label}`}
+                    disabled={count >= MAX_SPACES || busy}
+                    onPress={() => setCount(option.id, count + 1)}
+                    style={[styles.quantityButton, (count >= MAX_SPACES || busy) && styles.disabled, pointer]}
+                  >
+                    <Text style={styles.quantityButtonLabel}>+</Text>
+                  </Pressable>
+                </View>
+              </View>
+            );
+          })}
+          {error ? <Text style={styles.error}>{error}</Text> : null}
+          <Pressable
+            accessibilityRole="button"
+            disabled={busy || !userId || spaces.length === 0}
+            onPress={() => {
+              void register();
+            }}
+            style={({ pressed }) => [
+              styles.primaryButton,
+              (busy || !userId || spaces.length === 0) && styles.disabled,
+              pressed && styles.pressed,
+              pointer,
+            ]}
+          >
+            <Text style={styles.primaryLabel}>{busy ? 'Saving…' : 'Register'}</Text>
+          </Pressable>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function userSearchText(account: AccountSummary): string {
+  return `${account.name} ${account.email} ${account.businessName ?? ''}`.toLowerCase();
 }
 
 function RegistrationOverride({
