@@ -359,6 +359,9 @@ function EventDetailView({
   }, [load]);
 
   const event = detail?.event;
+  const registrations = [...(detail?.registrations ?? [])].sort(
+    (left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+  );
   const availableSpaces = SPACE_OPTIONS.filter((option) => event?.spacesAvailable.includes(option.id));
   const chosenSpaces = selectedSpaces.filter((id) => availableSpaces.some((option) => option.id === id));
   const full = event?.capacity != null && event.registrationCount >= event.capacity && !event.registered;
@@ -583,10 +586,10 @@ function EventDetailView({
               </Pressable>
             ) : null}
             <Text style={styles.section}>Registrations</Text>
-            {detail?.registrations.length === 0 ? (
+            {registrations.length === 0 ? (
               <Text style={styles.muted}>No one has registered yet.</Text>
             ) : (
-              detail?.registrations.map((registration) => (
+              registrations.map((registration) => (
                 <View key={registration.id} style={styles.person}>
                   {admin && registration.userId ? (
                     <Pressable

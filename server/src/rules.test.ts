@@ -217,7 +217,7 @@ describe('map vendor choices', () => {
     assert.equal(requestedLabel([]), 'Not chosen');
   });
 
-  test('offers a vendor only for the spaces they still have left, without listing them twice', () => {
+  test('offers a vendor only for the spaces they still have left, in signup order, without listing them twice', () => {
     const mixed: MapRegistration = {
       id: 'mixed',
       name: 'Mixed Vendor',
@@ -225,10 +225,16 @@ describe('map vendor choices', () => {
       spacesRequested: ['grass', 'grass-generator', 'pavilion'],
     };
     const duplicate: MapRegistration = { ...ada, id: 'ada' };
+    const latest: MapRegistration = {
+      id: 'latest',
+      name: 'Aaron Early',
+      businessName: 'Aardvark',
+      spacesRequested: ['pavilion'],
+    };
     const map: EventMap = {
       title: 'Community Day',
       volunteers: '',
-      registrations: [ada, grace, food, mixed, duplicate],
+      registrations: [ada, grace, food, mixed, duplicate, latest],
       assignments: [
         { area: 'pavilion', spot: 1, registrationId: 'ada' },
         { area: 'pavilion', spot: 2, registrationId: 'ada' },
@@ -236,7 +242,7 @@ describe('map vendor choices', () => {
         { area: 'grass', spot: 3, registrationId: 'mixed' },
       ],
     };
-    assert.deepEqual(unassignedVendors(map, 'pavilion', 'ada').map((vendor) => vendor.id), ['ada', 'mixed']);
+    assert.deepEqual(unassignedVendors(map, 'pavilion', 'ada').map((vendor) => vendor.id), ['ada', 'mixed', 'latest']);
     assert.deepEqual(unassignedVendors(map, 'grass', null).map((vendor) => vendor.id), ['mixed']);
     assert.deepEqual(unassignedVendors(map, 'food-truck', null).map((vendor) => vendor.id), []);
     assert.equal(
