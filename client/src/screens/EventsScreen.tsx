@@ -18,14 +18,17 @@ import {
   createEvent,
   deleteEvent,
   downloadEmailLog,
+  fetchAccounts,
   fetchEmailAudiences,
   fetchEmailLog,
   fetchEvent,
   fetchEvents,
   markRegistrationPaid,
   registerForEvent,
+  registerUserForEvent,
   sendEventEmail,
   startEventPayment,
+  type AccountSummary,
   type EmailAudience,
   type EmailAudienceCounts,
   type EmailImage,
@@ -39,6 +42,7 @@ import {
   type RegistrationSummary,
 } from '../api/client';
 import { useAuth } from '../auth/AuthProvider';
+import { pathForLocation, type AppLocation } from '../routes';
 import { parseAddressList, recipientNoun } from '../email/addresses';
 import { descriptionForEditor } from '../description';
 import { Logo } from '../Logo';
@@ -87,6 +91,46 @@ type Screen =
   | { name: 'account'; id: string; back: 'users' | 'detail'; eventId?: string }
   | { name: 'profile' };
 
+function screenFromLocation(location: AppLocation, user: { id: string; admin: boolean }): Screen {
+  if (location.screen === 'event') {
+    return { name: 'detail', id: location.eventId };
+  }
+  if (location.screen === 'profile') {
+    return { name: 'profile' };
+  }
+  if (location.screen === 'users') {
+    return user.admin ? { name: 'users' } : { name: 'list' };
+  }
+  if (location.screen === 'user') {
+    if (user.admin) {
+      return { name: 'account', id: location.userId, back: 'users' };
+    }
+    if (location.userId === user.id) {
+      return { name: 'profile' };
+    }
+  }
+  return { name: 'list' };
+}
+
+function locationForScreen(next: Screen): AppLocation {
+  switch (next.name) {
+    case 'detail':
+    case 'map':
+      return { screen: 'event', eventId: next.id };
+    case 'edit':
+      return { screen: 'event', eventId: next.event.id };
+    case 'profile':
+      return { screen: 'profile' };
+    case 'users':
+    case 'create-user':
+      return { screen: 'users' };
+    case 'account':
+      return { screen: 'user', userId: next.id };
+    default:
+      return { screen: 'events' };
+  }
+}
+
 function sectionFor(screen: Screen): 'events' | 'users' | 'profile' {
   if (screen.name === 'profile') {
     return 'profile';
@@ -97,11 +141,78 @@ function sectionFor(screen: Screen): 'events' | 'users' | 'profile' {
   return 'events';
 }
 
-export function EventsScreen({ initialEventId = null }: { initialEventId?: string | null }) {
+export function EventsScreen({
+  location,
+  onLocation,
+}: {
+  location: AppLocation;
+  onLocation: (location: AppLocation, mode?: 'push' | 'replace') => void;
+}) {
   const { token, user, signOut } = useAuth();
-  const [screen, setScreen] = useState<Screen>(
-    initialEventId ? { name: 'detail', id: initialEventId } : { name: 'list' },
+  const locationKey = pathForLocation(location);
+  const [screen, setScreen] = useState<Screen>(() =>
+    user ? screenFromLocation(location, user) : { name: 'list' },
   );
+  const [checkoutReady, setCheckoutReady] = useState(
+    () =>
+      Platform.OS !== 'web' ||
+      typeof window === 'undefined' ||
+      !new URLSearchParams(window.location.search).has('checkout_session_id'),
+  );
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const seenLocation = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (checkoutReady || !token || Platform.OS !== 'web' || typeof window === 'undefined') {
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get('checkout_session_id');
+    if (!sessionId) {
+      setCheckoutReady(true);
+      return;
+    }
+    params.delete('checkout_session_id');
+    const search = params.toString();
+    window.history.replaceState({}, '', `${window.location.pathname}${search ? `?${search}` : ''}`);
+    let active = true;
+    confirmCheckout(token, sessionId)
+      .catch((reason: unknown) => {
+        if (active) {
+          setCheckoutError(messageFrom(reason));
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setCheckoutReady(true);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [checkoutReady, token]);
+
+  useEffect(() => {
+    if (!user || seenLocation.current === locationKey) {
+      return;
+    }
+    seenLocation.current = locationKey;
+    const next = screenFromLocation(location, user);
+    setScreen(next);
+    const canonical = locationForScreen(next);
+    if (pathForLocation(canonical) !== locationKey) {
+      onLocation(canonical, 'replace');
+    }
+  }, [location, locationKey, onLocation, user]);
+
+  function go(next: Screen) {
+    setScreen(next);
+    const target = locationForScreen(next);
+    if (pathForLocation(target) !== locationKey) {
+      seenLocation.current = pathForLocation(target);
+    }
+    onLocation(target);
+  }
 
   if (!token || !user) {
     return null;
@@ -115,7 +226,7 @@ export function EventsScreen({ initialEventId = null }: { initialEventId?: strin
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Events"
-          onPress={() => setScreen({ name: 'list' })}
+          onPress={() => go({ name: 'list' })}
           style={[styles.logoButton, pointer]}
         >
           <Logo />
@@ -129,23 +240,26 @@ export function EventsScreen({ initialEventId = null }: { initialEventId?: strin
         </View>
         <View style={styles.navRow}>
           <View style={styles.navTabs}>
-            <NavTab label="Events" selected={section === 'events'} onPress={() => setScreen({ name: 'list' })} />
+            <NavTab label="Events" selected={section === 'events'} onPress={() => go({ name: 'list' })} />
             {user.admin ? (
-              <NavTab label="Users" selected={section === 'users'} onPress={() => setScreen({ name: 'users' })} />
+              <NavTab label="Users" selected={section === 'users'} onPress={() => go({ name: 'users' })} />
             ) : null}
-            <NavTab label="Profile" selected={section === 'profile'} onPress={() => setScreen({ name: 'profile' })} />
+            <NavTab label="Profile" selected={section === 'profile'} onPress={() => go({ name: 'profile' })} />
           </View>
           <Pressable accessibilityRole="button" onPress={signOut} style={pointer}>
             <Text style={styles.signOut}>Sign out</Text>
           </Pressable>
         </View>
       </View>
+      {checkoutError ? <ErrorText message={checkoutError} /> : null}
+      {checkoutReady ? (
+      <>
       {screen.name === 'list' ? (
         <EventList
           token={token}
           admin={user.admin}
-          onOpen={(id) => setScreen({ name: 'detail', id })}
-          onCreate={() => setScreen({ name: 'create' })}
+          onOpen={(id) => go({ name: 'detail', id })}
+          onCreate={() => go({ name: 'create' })}
         />
       ) : null}
       {screen.name === 'detail' ? (
@@ -153,33 +267,33 @@ export function EventsScreen({ initialEventId = null }: { initialEventId?: strin
           token={token}
           admin={user.admin}
           eventId={screen.id}
-          onBack={() => setScreen({ name: 'list' })}
-          onEdit={(event) => setScreen({ name: 'edit', event })}
-          onOpenMap={() => setScreen({ name: 'map', id: screen.id })}
-          onOpenUser={(id) => setScreen({ name: 'account', id, back: 'detail', eventId: screen.id })}
+          onBack={() => go({ name: 'list' })}
+          onEdit={(event) => go({ name: 'edit', event })}
+          onOpenMap={() => go({ name: 'map', id: screen.id })}
+          onOpenUser={(id) => go({ name: 'account', id, back: 'detail', eventId: screen.id })}
         />
       ) : null}
       {screen.name === 'users' ? (
         <AccountList
           token={token}
-          onOpen={(id) => setScreen({ name: 'account', id, back: 'users' })}
-          onCreate={() => setScreen({ name: 'create-user' })}
+          onOpen={(id) => go({ name: 'account', id, back: 'users' })}
+          onCreate={() => go({ name: 'create-user' })}
         />
       ) : null}
       {screen.name === 'create-user' ? (
         <AccountCreateForm
           token={token}
-          onCancel={() => setScreen({ name: 'users' })}
-          onCreated={(id) => setScreen({ name: 'account', id, back: 'users' })}
+          onCancel={() => go({ name: 'users' })}
+          onCreated={(id) => go({ name: 'account', id, back: 'users' })}
         />
       ) : null}
-      {screen.name === 'profile' ? <VendorProfileScreen embedded onBack={() => setScreen({ name: 'list' })} /> : null}
+      {screen.name === 'profile' ? <VendorProfileScreen embedded onBack={() => go({ name: 'list' })} /> : null}
       {screen.name === 'account' ? (
         <AccountDetailView
           token={token}
           userId={screen.id}
           onBack={() =>
-            setScreen(
+            go(
               screen.back === 'detail' && screen.eventId
                 ? { name: 'detail', id: screen.eventId }
                 : { name: 'users' },
@@ -190,21 +304,27 @@ export function EventsScreen({ initialEventId = null }: { initialEventId?: strin
       {screen.name === 'create' ? (
         <EventForm
           token={token}
-          onCancel={() => setScreen({ name: 'list' })}
-          onSaved={(id) => setScreen({ name: 'detail', id })}
+          onCancel={() => go({ name: 'list' })}
+          onSaved={(id) => go({ name: 'detail', id })}
         />
       ) : null}
       {screen.name === 'edit' ? (
         <EventForm
           token={token}
           event={screen.event}
-          onCancel={() => setScreen({ name: 'detail', id: screen.event.id })}
-          onSaved={(id) => setScreen({ name: 'detail', id })}
+          onCancel={() => go({ name: 'detail', id: screen.event.id })}
+          onSaved={(id) => go({ name: 'detail', id })}
         />
       ) : null}
       {screen.name === 'map' ? (
-        <MapScreen token={token} eventId={screen.id} onBack={() => setScreen({ name: 'detail', id: screen.id })} />
+        <MapScreen token={token} eventId={screen.id} onBack={() => go({ name: 'detail', id: screen.id })} />
       ) : null}
+      </>
+      ) : (
+        <View style={styles.loading}>
+          <ActivityIndicator color={colors.accent} />
+        </View>
+      )}
     </View>
   );
 }
@@ -246,20 +366,6 @@ function EventList({
   useEffect(() => {
     load();
   }, [load]);
-
-  useEffect(() => {
-    if (Platform.OS !== 'web' || typeof window === 'undefined') {
-      return;
-    }
-    const sessionId = new URLSearchParams(window.location.search).get('checkout_session_id');
-    if (!sessionId) {
-      return;
-    }
-    window.history.replaceState({}, '', window.location.pathname);
-    confirmCheckout(token, sessionId)
-      .then(() => load())
-      .catch((reason: unknown) => setError(messageFrom(reason)));
-  }, [load, token]);
 
   const unpaid = events?.filter((event) => event.registered && !event.paid) ?? [];
 
@@ -359,6 +465,9 @@ function EventDetailView({
   }, [load]);
 
   const event = detail?.event;
+  const registrations = [...(detail?.registrations ?? [])].sort(
+    (left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+  );
   const availableSpaces = SPACE_OPTIONS.filter((option) => event?.spacesAvailable.includes(option.id));
   const chosenSpaces = selectedSpaces.filter((id) => availableSpaces.some((option) => option.id === id));
   const full = event?.capacity != null && event.registrationCount >= event.capacity && !event.registered;
@@ -583,10 +692,10 @@ function EventDetailView({
               </Pressable>
             ) : null}
             <Text style={styles.section}>Registrations</Text>
-            {detail?.registrations.length === 0 ? (
+            {registrations.length === 0 ? (
               <Text style={styles.muted}>No one has registered yet.</Text>
             ) : (
-              detail?.registrations.map((registration) => (
+              registrations.map((registration) => (
                 <View key={registration.id} style={styles.person}>
                   {admin && registration.userId ? (
                     <Pressable
@@ -621,6 +730,17 @@ function EventDetailView({
                 </View>
               ))
             )}
+            {admin ? (
+              <AdminRegistration
+                token={token}
+                eventId={event.id}
+                offered={event.spacesAvailable}
+                registeredUserIds={registrations.flatMap((registration) =>
+                  registration.userId ? [registration.userId] : [],
+                )}
+                onChanged={setDetail}
+              />
+            ) : null}
             {admin ? (
               confirmingDelete ? (
                 <View style={styles.deleteBox}>
@@ -1301,6 +1421,198 @@ function splitDateTime(value: string | null | undefined): { date: string; time: 
   };
 }
 
+function AdminRegistration({
+  token,
+  eventId,
+  offered,
+  registeredUserIds,
+  onChanged,
+}: {
+  token: string;
+  eventId: string;
+  offered: RegistrationSummary['spacesRequested'];
+  registeredUserIds: string[];
+  onChanged: (detail: EventDetail) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [users, setUsers] = useState<AccountSummary[] | null>(null);
+  const [query, setQuery] = useState('');
+  const [userId, setUserId] = useState<string | null>(null);
+  const [spaces, setSpaces] = useState<RegistrationSummary['spacesRequested']>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const choices = SPACE_OPTIONS.filter((option) => offered.includes(option.id));
+  const registered = new Set(registeredUserIds);
+  const eligible = (users ?? []).filter((account) => !account.archived && !registered.has(account.id));
+  const typed = query.trim().toLowerCase();
+  const matches =
+    typed.length >= 2
+      ? eligible.filter((account) => userSearchText(account).includes(typed)).slice(0, 12)
+      : eligible.length <= 8
+        ? eligible
+        : [];
+  const selected = eligible.find((account) => account.id === userId) ?? null;
+  const visible = selected ? [selected, ...matches.filter((account) => account.id !== selected.id)] : matches;
+
+  useEffect(() => {
+    if (!open || users) {
+      return;
+    }
+    let active = true;
+    fetchAccounts(token)
+      .then((body) => {
+        if (active) {
+          setUsers(body.users);
+        }
+      })
+      .catch((reason: unknown) => {
+        if (active) {
+          setUsers([]);
+          setError(messageFrom(reason));
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [open, token, users]);
+
+  function setCount(id: RegistrationSummary['spacesRequested'][number], count: number) {
+    const next = Math.max(0, Math.min(MAX_SPACES, count));
+    setSpaces((current) => [...current.filter((item) => item !== id), ...Array.from({ length: next }, () => id)]);
+  }
+
+  async function register() {
+    if (!userId) {
+      setError('Choose a user.');
+      return;
+    }
+    if (spaces.length === 0) {
+      setError('Choose at least one space.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      onChanged(await registerUserForEvent(token, eventId, userId, spaces));
+      setOpen(false);
+      setQuery('');
+      setUserId(null);
+      setSpaces([]);
+    } catch (reason) {
+      setError(messageFrom(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <View style={styles.emailBox}>
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => {
+          setOpen((shown) => !shown);
+          setError(null);
+        }}
+        style={pointer}
+      >
+        <Text style={styles.back}>{open ? 'Close registration' : 'Register a user'}</Text>
+      </Pressable>
+      {open ? (
+        <View style={styles.emailForm}>
+          <Text style={styles.muted}>The booth fee stays due until you mark it paid.</Text>
+          <Field
+            label="Find a user"
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Name or email"
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          {users == null && !error ? <ActivityIndicator color={colors.accent} /> : null}
+          {users && eligible.length === 0 && !error ? (
+            <Text style={styles.muted}>Everyone is already registered.</Text>
+          ) : null}
+          {users && eligible.length > 8 && typed.length < 2 ? (
+            <Text style={styles.muted}>Type at least two letters to find a user.</Text>
+          ) : null}
+          {typed.length >= 2 && matches.length === 0 && !selected ? (
+            <Text style={styles.muted}>No user matches that.</Text>
+          ) : null}
+          {visible.map((account) => {
+            const chosen = account.id === userId;
+            return (
+              <Pressable
+                key={account.id}
+                accessibilityRole="button"
+                accessibilityState={{ selected: chosen }}
+                onPress={() => {
+                  setUserId(account.id);
+                  setError(null);
+                }}
+                style={[styles.choice, chosen && styles.choiceSelected, pointer]}
+              >
+                <Text style={styles.choiceLabel}>{account.name}</Text>
+                <Text style={styles.muted}>{account.email}</Text>
+                {account.businessName ? <Text style={styles.muted}>{account.businessName}</Text> : null}
+              </Pressable>
+            );
+          })}
+          {choices.length === 0 ? <Text style={styles.muted}>No spaces are available for this event.</Text> : null}
+          {choices.map((option) => {
+            const count = spaces.filter((id) => id === option.id).length;
+            return (
+              <View key={option.id} style={styles.quantityRow}>
+                <Text style={styles.choiceLabel}>{option.label}</Text>
+                <View style={styles.quantityControls}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Fewer ${option.label}`}
+                    disabled={count === 0 || busy}
+                    onPress={() => setCount(option.id, count - 1)}
+                    style={[styles.quantityButton, (count === 0 || busy) && styles.disabled, pointer]}
+                  >
+                    <Text style={styles.quantityButtonLabel}>−</Text>
+                  </Pressable>
+                  <Text style={styles.quantityCount}>{count}</Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`More ${option.label}`}
+                    disabled={count >= MAX_SPACES || busy}
+                    onPress={() => setCount(option.id, count + 1)}
+                    style={[styles.quantityButton, (count >= MAX_SPACES || busy) && styles.disabled, pointer]}
+                  >
+                    <Text style={styles.quantityButtonLabel}>+</Text>
+                  </Pressable>
+                </View>
+              </View>
+            );
+          })}
+          {error ? <Text style={styles.error}>{error}</Text> : null}
+          <Pressable
+            accessibilityRole="button"
+            disabled={busy || !userId || spaces.length === 0}
+            onPress={() => {
+              void register();
+            }}
+            style={({ pressed }) => [
+              styles.primaryButton,
+              (busy || !userId || spaces.length === 0) && styles.disabled,
+              pressed && styles.pressed,
+              pointer,
+            ]}
+          >
+            <Text style={styles.primaryLabel}>{busy ? 'Saving…' : 'Register'}</Text>
+          </Pressable>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function userSearchText(account: AccountSummary): string {
+  return `${account.name} ${account.email} ${account.businessName ?? ''}`.toLowerCase();
+}
+
 function RegistrationOverride({
   token,
   eventId,
@@ -1525,6 +1837,11 @@ function messageFrom(reason: unknown): string {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
+  loading: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   header: {
     paddingHorizontal: 24,
     paddingTop: 12,

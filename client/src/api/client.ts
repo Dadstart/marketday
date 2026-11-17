@@ -247,6 +247,18 @@ export function registerForEvent(
   });
 }
 
+export function registerUserForEvent(
+  token: string,
+  eventId: string,
+  userId: string,
+  spacesRequested: RegistrationSummary['spacesRequested'],
+): Promise<EventDetail> {
+  return request(`/events/${eventId}/registrations`, token, {
+    method: 'POST',
+    body: JSON.stringify({ userId, spacesRequested }),
+  });
+}
+
 export function unregisterFromEvent(token: string, eventId: string): Promise<EventDetail> {
   return request(`/events/${eventId}/registrations`, token, { method: 'DELETE' });
 }

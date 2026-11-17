@@ -3,6 +3,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 
 import { fetchEvent, fetchEvents, type EventSummary } from '../api/client';
 import { Logo } from '../Logo';
+import { type AppLocation } from '../routes';
 import { colors, pointer, serif } from '../theme';
 import { FormattedText } from './FormattedText';
 import { SignInPrompt } from './SignInScreen';
@@ -14,31 +15,47 @@ const SPACE_LABELS: Record<string, string> = {
   pavilion: '10x10 pavilion',
 };
 
-export function PublicEventsScreen({ onViewingEvent }: { onViewingEvent: (eventId: string | null) => void }) {
-  const [eventId, setEventId] = useState<string | null>(null);
-  const [prompt, setPrompt] = useState<'register' | 'sign-in' | null>(null);
+export function PublicEventsScreen({
+  location,
+  onLocation,
+}: {
+  location: AppLocation;
+  onLocation: (location: AppLocation) => void;
+}) {
+  const accountLink = location.screen === 'profile' || location.screen === 'users' || location.screen === 'user';
+  const [eventId, setEventId] = useState<string | null>(location.screen === 'event' ? location.eventId : null);
+  const [prompt, setPrompt] = useState<'register' | 'sign-in' | null>(accountLink ? 'sign-in' : null);
+
+  useEffect(() => {
+    if (location.screen === 'event') {
+      setEventId(location.eventId);
+      setPrompt((current) => (current === 'register' ? current : null));
+      return;
+    }
+    setEventId(null);
+    setPrompt(accountLink ? 'sign-in' : null);
+  }, [accountLink, location]);
 
   function open(id: string, nextPrompt: 'register' | 'sign-in' | null = null) {
     setEventId(id);
     setPrompt(nextPrompt);
-    onViewingEvent(nextPrompt === 'register' ? id : null);
+    onLocation({ screen: 'event', eventId: id });
   }
 
   function back() {
     setEventId(null);
     setPrompt(null);
-    onViewingEvent(null);
+    onLocation({ screen: 'events' });
   }
 
   function dismissPrompt() {
     setPrompt(null);
-    onViewingEvent(null);
   }
 
   function registerFor(id: string) {
     setEventId(id);
     setPrompt('register');
-    onViewingEvent(id);
+    onLocation({ screen: 'event', eventId: id });
   }
 
   return (
@@ -63,7 +80,6 @@ export function PublicEventsScreen({ onViewingEvent }: { onViewingEvent: (eventI
               if (prompt === 'register') {
                 return;
               }
-              onViewingEvent(null);
               setPrompt((current) => (current === 'sign-in' ? null : 'sign-in'));
             }}
             style={pointer}
@@ -76,12 +92,18 @@ export function PublicEventsScreen({ onViewingEvent }: { onViewingEvent: (eventI
         <PublicEventDetail
           eventId={eventId}
           prompt={prompt}
+          signInMessage={accountLink ? 'Sign in to open that profile.' : undefined}
           onBack={back}
           onRegister={() => registerFor(eventId)}
           onDismissPrompt={dismissPrompt}
         />
       ) : (
-        <PublicEventList prompt={prompt} onOpen={open} onDismissPrompt={dismissPrompt} />
+        <PublicEventList
+          prompt={prompt}
+          signInMessage={accountLink ? 'Sign in to open that profile.' : undefined}
+          onOpen={open}
+          onDismissPrompt={dismissPrompt}
+        />
       )}
     </View>
   );
@@ -89,10 +111,12 @@ export function PublicEventsScreen({ onViewingEvent }: { onViewingEvent: (eventI
 
 function PublicEventList({
   prompt,
+  signInMessage,
   onOpen,
   onDismissPrompt,
 }: {
   prompt: 'register' | 'sign-in' | null;
+  signInMessage?: string;
   onOpen: (id: string, nextPrompt?: 'register' | 'sign-in' | null) => void;
   onDismissPrompt: () => void;
 }) {
@@ -120,7 +144,10 @@ function PublicEventList({
           This website is used for Crosswinds Community and Market Day registrations.
         </Text>
         {prompt === 'sign-in' ? (
-          <SignInPrompt message="Sign in with your Google or Microsoft account." onDismiss={onDismissPrompt} />
+          <SignInPrompt
+            message={signInMessage ?? 'Sign in with your Google or Microsoft account.'}
+            onDismiss={onDismissPrompt}
+          />
         ) : null}
         {error ? <Text style={styles.error}>{error}</Text> : null}
         {events == null && !error ? <ActivityIndicator color={colors.accent} /> : null}
@@ -153,12 +180,14 @@ function PublicEventList({
 function PublicEventDetail({
   eventId,
   prompt,
+  signInMessage,
   onBack,
   onRegister,
   onDismissPrompt,
 }: {
   eventId: string;
   prompt: 'register' | 'sign-in' | null;
+  signInMessage?: string;
   onBack: () => void;
   onRegister: () => void;
   onDismissPrompt: () => void;
@@ -188,7 +217,9 @@ function PublicEventDetail({
 
   const full = event?.capacity != null && event.registrationCount >= event.capacity;
   const promptMessage =
-    prompt === 'register' ? 'Sign in to register for this event.' : 'Sign in with your Google or Microsoft account.';
+    prompt === 'register'
+      ? 'Sign in to register for this event.'
+      : (signInMessage ?? 'Sign in with your Google or Microsoft account.');
 
   return (
     <ScrollView style={styles.flex} contentContainerStyle={styles.content}>

@@ -5,7 +5,7 @@ import { parseAddressList } from '../../client/src/email/addresses.js';
 import { createApp, type AppServices } from './create-app.js';
 import { DatabaseError, SesError } from './errors.js';
 import type { EmailMessage, EmailSendProgress } from './mail.js';
-import type { CurrentUser, EventRecord } from './types.js';
+import type { AccountDetail, CurrentUser, EventRecord } from './types.js';
 
 const future = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 const past = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
@@ -49,6 +49,30 @@ function eventRecord(overrides: Partial<EventRecord> = {}): EventRecord {
 
 function detail(overrides: Partial<EventRecord> = {}) {
   return { event: eventRecord(overrides), registrations: [] };
+}
+
+function account(overrides: Partial<AccountDetail> = {}): AccountDetail {
+  return {
+    id: 'user-2',
+    name: 'Ada Lovelace',
+    email: 'ada@example.com',
+    businessName: 'Analytical Engines',
+    profileComplete: true,
+    brandingImage: null,
+    archived: false,
+    emailOptOut: false,
+    provider: 'google',
+    venmo: null,
+    contactPerson: null,
+    phone: null,
+    crosswindsResident: null,
+    offering: null,
+    productsAndServices: null,
+    facebookName: null,
+    adminNotes: null,
+    createdAt: future,
+    ...overrides,
+  };
 }
 
 function missing(name: string): () => Promise<never> {
@@ -452,6 +476,52 @@ describe('events and registration', () => {
     const app = appFor(person(), { getEvent: async () => detail() });
     const response = await call(app, 'POST', '/events/event-1/registrations', { body: { spacesRequested: [] } });
     assert.equal(response.status, 400);
+  });
+
+  test('an administrator can register another user, and a vendor cannot', async () => {
+    const vendor = await call(appFor(person()), 'POST', '/events/event-1/registrations', {
+      body: { userId: 'user-2', spacesRequested: ['grass'] },
+    });
+    assert.equal(vendor.status, 403);
+    assert.match(vendor.body?.error ?? '', /administrator/);
+
+    let registered: { eventId: string; userId: string; spaces: string[] } | null = null;
+    const app = appFor(admin, {
+      getAccount: async () => account(),
+      getOwnedRegistration: async () => null,
+      registerForEvent: async (eventId, userId, spaces) => {
+        registered = { eventId, userId, spaces };
+      },
+      getEvent: async () => detail(),
+    });
+    assert.equal(
+      (await call(app, 'POST', '/events/event-1/registrations', { body: { userId: 'user-2', spacesRequested: ['grass', 'grass'] } })).status,
+      200,
+    );
+    assert.deepEqual(registered, { eventId: 'event-1', userId: 'user-2', spaces: ['grass', 'grass'] });
+
+    const missingUser = appFor(admin, { getAccount: async () => null });
+    const missingResponse = await call(missingUser, 'POST', '/events/event-1/registrations', {
+      body: { userId: 'missing', spacesRequested: ['grass'] },
+    });
+    assert.equal(missingResponse.status, 404);
+
+    const archived = appFor(admin, { getAccount: async () => account({ archived: true }) });
+    const archivedResponse = await call(archived, 'POST', '/events/event-1/registrations', {
+      body: { userId: 'user-2', spacesRequested: ['grass'] },
+    });
+    assert.equal(archivedResponse.status, 400);
+    assert.match(archivedResponse.body?.error ?? '', /Restore/);
+
+    const duplicate = appFor(admin, {
+      getAccount: async () => account(),
+      getOwnedRegistration: async () => ({ id: 'reg-2', paidAt: null, stripeCheckoutSessionId: null }),
+    });
+    const duplicateResponse = await call(duplicate, 'POST', '/events/event-1/registrations', {
+      body: { userId: 'user-2', spacesRequested: ['grass'] },
+    });
+    assert.equal(duplicateResponse.status, 409);
+    assert.match(duplicateResponse.body?.error ?? '', /already registered/);
   });
 
   test('saves a branding image with the profile and rejects a file that is not a picture', async () => {

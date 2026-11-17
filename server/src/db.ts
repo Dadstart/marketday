@@ -647,7 +647,7 @@ export async function getEvent(
     throw databaseFailure(registrationError.message);
   }
 
-  const rows = (registrationRows ?? []) as RegistrantRow[];
+  const rows = ((registrationRows ?? []) as RegistrantRow[]).sort(bySignupTime);
   const registrations = user
     ? rows.map((row) => {
         const account = Array.isArray(row.users) ? row.users[0] : row.users;
@@ -1218,7 +1218,7 @@ export async function getEventMap(eventId: string): Promise<EventMap | null> {
 
   const { data: registrationRows, error: registrationError } = await supabase
     .from('registrations')
-    .select('id, spaces_requested, users(name, business_name)')
+    .select('id, created_at, spaces_requested, users(name, business_name)')
     .eq('event_id', eventId)
     .order('created_at', { ascending: true });
   if (registrationError) {
@@ -1239,7 +1239,7 @@ export async function getEventMap(eventId: string): Promise<EventMap | null> {
     throw databaseFailure(assignmentError.message);
   }
 
-  const registrations = ((registrationRows ?? []) as MapRegistrationRow[]).map((row) => {
+  const registrations = ((registrationRows ?? []) as MapRegistrationRow[]).sort(bySignupTime).map((row) => {
     const account = Array.isArray(row.users) ? row.users[0] : row.users;
     return {
       id: row.id,
@@ -1386,8 +1386,13 @@ export async function assignEventSpace(
   }
 }
 
+function bySignupTime(left: { id: string; created_at: string }, right: { id: string; created_at: string }): number {
+  return left.created_at.localeCompare(right.created_at) || left.id.localeCompare(right.id);
+}
+
 type MapRegistrationRow = {
   id: string;
+  created_at: string;
   spaces_requested: string[] | null;
   users:
     | { name: string; business_name: string | null }

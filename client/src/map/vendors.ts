@@ -71,6 +71,5 @@ export function unassignedVendors(map: EventMap, area: MapArea, currentId: strin
       }
       const assigned = map.assignments.filter((item) => item.registrationId === registration.id && item.area === area).length;
       return assigned < requestedInArea(registration.spacesRequested, area);
-    })
-    .sort((left, right) => vendorLabel(left).localeCompare(vendorLabel(right)));
+    });
 }
