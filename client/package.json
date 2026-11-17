@@ -21,6 +21,7 @@
     "typescript": "~6.0.3"
   },
   "scripts": {
+    "postinstall": "node ../scripts/install-version-hook.mjs",
     "start": "node --env-file=../.env ./node_modules/expo/bin/cli start",
     "android": "node --env-file=../.env ./node_modules/expo/bin/cli start --android",
     "ios": "node --env-file=../.env ./node_modules/expo/bin/cli start --ios",

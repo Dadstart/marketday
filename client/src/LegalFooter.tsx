@@ -2,6 +2,7 @@ import { Platform, StyleSheet, Text, View, type TextStyle } from 'react-native';
 
 import { type LegalDocumentName } from './legal';
 import { colors } from './theme';
+import { appVersion } from './version';
 
 export function LegalFooter({ onOpen }: { onOpen: (name: LegalDocumentName) => void }) {
   return (
@@ -13,6 +14,10 @@ export function LegalFooter({ onOpen }: { onOpen: (name: LegalDocumentName) => v
       <LegalLink href="/tos.html" onOpen={() => onOpen('terms')}>
         Terms of Service
       </LegalLink>
+      <Text style={styles.separator}>·</Text>
+      <Text accessibilityLabel={`Version ${appVersion}`} style={styles.version}>
+        v{appVersion}
+      </Text>
     </View>
   );
 }
@@ -63,5 +68,10 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     textDecorationLine: 'underline',
     ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as TextStyle) : null),
+  },
+  version: {
+    color: colors.muted,
+    fontSize: 14,
+    lineHeight: 20,
   },
 });
