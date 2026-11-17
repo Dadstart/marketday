@@ -1,13 +1,14 @@
 import { StatusBar } from 'expo-status-bar';
 import * as WebBrowser from 'expo-web-browser';
-import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Linking, Platform, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 import { AuthProvider, useAuth } from './src/auth/AuthProvider';
 import { isWebSignInReturn } from './src/auth/webRedirect';
 import { legalDocumentFromPath, type LegalDocumentName } from './src/legal';
 import { LegalFooter } from './src/LegalFooter';
+import { locationFromUrl, readBrowserLocation, writeBrowserLocation, type AppLocation } from './src/routes';
 import { LegalDocumentScreen } from './src/screens/LegalDocumentScreen';
 import { EventsScreen } from './src/screens/EventsScreen';
 import { PublicEventsScreen } from './src/screens/PublicEventsScreen';
@@ -15,33 +16,6 @@ import { VendorProfileScreen } from './src/screens/VendorProfileScreen';
 import { colors } from './src/theme';
 
 const authPopup = WebBrowser.maybeCompleteAuthSession();
-const resumeEventKey = 'marketday.resumeEvent';
-
-function readResumeEvent(): string | null {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-  try {
-    return window.sessionStorage.getItem(resumeEventKey);
-  } catch {
-    return null;
-  }
-}
-
-function writeResumeEvent(eventId: string | null) {
-  if (typeof window === 'undefined') {
-    return;
-  }
-  try {
-    if (eventId) {
-      window.sessionStorage.setItem(resumeEventKey, eventId);
-    } else {
-      window.sessionStorage.removeItem(resumeEventKey);
-    }
-  } catch {
-    // Sign-in still works if the browser blocks storage. The event list stays available.
-  }
-}
 
 export default function App() {
   if (authPopup.type === 'success' && !isWebSignInReturn()) {
@@ -68,39 +42,50 @@ function legalFromLocation(): LegalDocumentName | null {
 function Root() {
   const { user, ready } = useAuth();
   const [legal, setLegal] = useState<LegalDocumentName | null>(() => legalFromLocation());
-  const [resumeEventId, setResumeEventId] = useState<string | null>(() => readResumeEvent());
-  const wasSignedIn = useRef(false);
+  const [location, setLocation] = useState<AppLocation>(() => readBrowserLocation());
+
+  const visit = useCallback((next: AppLocation, mode: 'push' | 'replace' = 'push') => {
+    writeBrowserLocation(next, mode);
+    setLocation(next);
+  }, []);
 
   useEffect(() => {
-    if (user) {
-      wasSignedIn.current = true;
-      writeResumeEvent(null);
-      return;
+    if (Platform.OS === 'web') {
+      const onPop = () => setLocation(readBrowserLocation());
+      window.addEventListener('popstate', onPop);
+      return () => window.removeEventListener('popstate', onPop);
     }
-    if (wasSignedIn.current) {
-      wasSignedIn.current = false;
-      setResumeEventId(null);
-    }
-  }, [user]);
-
-  function viewEvent(eventId: string | null) {
-    writeResumeEvent(eventId);
-    setResumeEventId(eventId);
-  }
+    let active = true;
+    Linking.getInitialURL()
+      .then((url) => {
+        if (active && url) {
+          setLocation(locationFromUrl(url));
+        }
+      })
+      .catch(() => undefined);
+    const subscription = Linking.addEventListener('url', (event) => {
+      setLocation(locationFromUrl(event.url));
+    });
+    return () => {
+      active = false;
+      subscription.remove();
+    };
+  }, []);
 
   function closeLegal() {
     setLegal(null);
     if (Platform.OS === 'web' && typeof window !== 'undefined' && legalDocumentFromPath(window.location.pathname)) {
       window.history.pushState({}, '', '/');
+      setLocation({ screen: 'events' });
     }
   }
 
   const needsProfile = Boolean(user && !user.admin && (!user.profileComplete || !user.profileReviewed));
-  let screen = <PublicEventsScreen onViewingEvent={viewEvent} />;
+  let screen = <PublicEventsScreen location={location} onLocation={visit} />;
   if (needsProfile) {
     screen = <VendorProfileScreen />;
   } else if (user) {
-    screen = <EventsScreen initialEventId={resumeEventId} />;
+    screen = <EventsScreen location={location} onLocation={visit} />;
   }
 
   return (

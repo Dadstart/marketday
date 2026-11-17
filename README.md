@@ -97,6 +97,12 @@ sudo rm -rf /var/www/communityday/*
 sudo cp -a dist/. /var/www/communityday/
 sudo chown -R caddy:caddy /var/www/communityday
 
+Event and profile links are `/events/<id>`, `/profile`, and `/users/<id>`. Caddy has to serve `index.html` for those paths, or a refresh shows a missing page:
+
+```
+try_files {path} /index.html
+```
+
 ### API
 cd /home/andrew/pi/marketday
 git pull

@@ -42,6 +42,7 @@ import {
   type RegistrationSummary,
 } from '../api/client';
 import { useAuth } from '../auth/AuthProvider';
+import { pathForLocation, type AppLocation } from '../routes';
 import { parseAddressList, recipientNoun } from '../email/addresses';
 import { descriptionForEditor } from '../description';
 import { Logo } from '../Logo';
@@ -90,6 +91,46 @@ type Screen =
   | { name: 'account'; id: string; back: 'users' | 'detail'; eventId?: string }
   | { name: 'profile' };
 
+function screenFromLocation(location: AppLocation, user: { id: string; admin: boolean }): Screen {
+  if (location.screen === 'event') {
+    return { name: 'detail', id: location.eventId };
+  }
+  if (location.screen === 'profile') {
+    return { name: 'profile' };
+  }
+  if (location.screen === 'users') {
+    return user.admin ? { name: 'users' } : { name: 'list' };
+  }
+  if (location.screen === 'user') {
+    if (user.admin) {
+      return { name: 'account', id: location.userId, back: 'users' };
+    }
+    if (location.userId === user.id) {
+      return { name: 'profile' };
+    }
+  }
+  return { name: 'list' };
+}
+
+function locationForScreen(next: Screen): AppLocation {
+  switch (next.name) {
+    case 'detail':
+    case 'map':
+      return { screen: 'event', eventId: next.id };
+    case 'edit':
+      return { screen: 'event', eventId: next.event.id };
+    case 'profile':
+      return { screen: 'profile' };
+    case 'users':
+    case 'create-user':
+      return { screen: 'users' };
+    case 'account':
+      return { screen: 'user', userId: next.id };
+    default:
+      return { screen: 'events' };
+  }
+}
+
 function sectionFor(screen: Screen): 'events' | 'users' | 'profile' {
   if (screen.name === 'profile') {
     return 'profile';
@@ -100,11 +141,78 @@ function sectionFor(screen: Screen): 'events' | 'users' | 'profile' {
   return 'events';
 }
 
-export function EventsScreen({ initialEventId = null }: { initialEventId?: string | null }) {
+export function EventsScreen({
+  location,
+  onLocation,
+}: {
+  location: AppLocation;
+  onLocation: (location: AppLocation, mode?: 'push' | 'replace') => void;
+}) {
   const { token, user, signOut } = useAuth();
-  const [screen, setScreen] = useState<Screen>(
-    initialEventId ? { name: 'detail', id: initialEventId } : { name: 'list' },
+  const locationKey = pathForLocation(location);
+  const [screen, setScreen] = useState<Screen>(() =>
+    user ? screenFromLocation(location, user) : { name: 'list' },
   );
+  const [checkoutReady, setCheckoutReady] = useState(
+    () =>
+      Platform.OS !== 'web' ||
+      typeof window === 'undefined' ||
+      !new URLSearchParams(window.location.search).has('checkout_session_id'),
+  );
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const seenLocation = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (checkoutReady || !token || Platform.OS !== 'web' || typeof window === 'undefined') {
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get('checkout_session_id');
+    if (!sessionId) {
+      setCheckoutReady(true);
+      return;
+    }
+    params.delete('checkout_session_id');
+    const search = params.toString();
+    window.history.replaceState({}, '', `${window.location.pathname}${search ? `?${search}` : ''}`);
+    let active = true;
+    confirmCheckout(token, sessionId)
+      .catch((reason: unknown) => {
+        if (active) {
+          setCheckoutError(messageFrom(reason));
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setCheckoutReady(true);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [checkoutReady, token]);
+
+  useEffect(() => {
+    if (!user || seenLocation.current === locationKey) {
+      return;
+    }
+    seenLocation.current = locationKey;
+    const next = screenFromLocation(location, user);
+    setScreen(next);
+    const canonical = locationForScreen(next);
+    if (pathForLocation(canonical) !== locationKey) {
+      onLocation(canonical, 'replace');
+    }
+  }, [location, locationKey, onLocation, user]);
+
+  function go(next: Screen) {
+    setScreen(next);
+    const target = locationForScreen(next);
+    if (pathForLocation(target) !== locationKey) {
+      seenLocation.current = pathForLocation(target);
+    }
+    onLocation(target);
+  }
 
   if (!token || !user) {
     return null;
@@ -118,7 +226,7 @@ export function EventsScreen({ initialEventId = null }: { initialEventId?: strin
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Events"
-          onPress={() => setScreen({ name: 'list' })}
+          onPress={() => go({ name: 'list' })}
           style={[styles.logoButton, pointer]}
         >
           <Logo />
@@ -132,23 +240,26 @@ export function EventsScreen({ initialEventId = null }: { initialEventId?: strin
         </View>
         <View style={styles.navRow}>
           <View style={styles.navTabs}>
-            <NavTab label="Events" selected={section === 'events'} onPress={() => setScreen({ name: 'list' })} />
+            <NavTab label="Events" selected={section === 'events'} onPress={() => go({ name: 'list' })} />
             {user.admin ? (
-              <NavTab label="Users" selected={section === 'users'} onPress={() => setScreen({ name: 'users' })} />
+              <NavTab label="Users" selected={section === 'users'} onPress={() => go({ name: 'users' })} />
             ) : null}
-            <NavTab label="Profile" selected={section === 'profile'} onPress={() => setScreen({ name: 'profile' })} />
+            <NavTab label="Profile" selected={section === 'profile'} onPress={() => go({ name: 'profile' })} />
           </View>
           <Pressable accessibilityRole="button" onPress={signOut} style={pointer}>
             <Text style={styles.signOut}>Sign out</Text>
           </Pressable>
         </View>
       </View>
+      {checkoutError ? <ErrorText message={checkoutError} /> : null}
+      {checkoutReady ? (
+      <>
       {screen.name === 'list' ? (
         <EventList
           token={token}
           admin={user.admin}
-          onOpen={(id) => setScreen({ name: 'detail', id })}
-          onCreate={() => setScreen({ name: 'create' })}
+          onOpen={(id) => go({ name: 'detail', id })}
+          onCreate={() => go({ name: 'create' })}
         />
       ) : null}
       {screen.name === 'detail' ? (
@@ -156,33 +267,33 @@ export function EventsScreen({ initialEventId = null }: { initialEventId?: strin
           token={token}
           admin={user.admin}
           eventId={screen.id}
-          onBack={() => setScreen({ name: 'list' })}
-          onEdit={(event) => setScreen({ name: 'edit', event })}
-          onOpenMap={() => setScreen({ name: 'map', id: screen.id })}
-          onOpenUser={(id) => setScreen({ name: 'account', id, back: 'detail', eventId: screen.id })}
+          onBack={() => go({ name: 'list' })}
+          onEdit={(event) => go({ name: 'edit', event })}
+          onOpenMap={() => go({ name: 'map', id: screen.id })}
+          onOpenUser={(id) => go({ name: 'account', id, back: 'detail', eventId: screen.id })}
         />
       ) : null}
       {screen.name === 'users' ? (
         <AccountList
           token={token}
-          onOpen={(id) => setScreen({ name: 'account', id, back: 'users' })}
-          onCreate={() => setScreen({ name: 'create-user' })}
+          onOpen={(id) => go({ name: 'account', id, back: 'users' })}
+          onCreate={() => go({ name: 'create-user' })}
         />
       ) : null}
       {screen.name === 'create-user' ? (
         <AccountCreateForm
           token={token}
-          onCancel={() => setScreen({ name: 'users' })}
-          onCreated={(id) => setScreen({ name: 'account', id, back: 'users' })}
+          onCancel={() => go({ name: 'users' })}
+          onCreated={(id) => go({ name: 'account', id, back: 'users' })}
         />
       ) : null}
-      {screen.name === 'profile' ? <VendorProfileScreen embedded onBack={() => setScreen({ name: 'list' })} /> : null}
+      {screen.name === 'profile' ? <VendorProfileScreen embedded onBack={() => go({ name: 'list' })} /> : null}
       {screen.name === 'account' ? (
         <AccountDetailView
           token={token}
           userId={screen.id}
           onBack={() =>
-            setScreen(
+            go(
               screen.back === 'detail' && screen.eventId
                 ? { name: 'detail', id: screen.eventId }
                 : { name: 'users' },
@@ -193,21 +304,27 @@ export function EventsScreen({ initialEventId = null }: { initialEventId?: strin
       {screen.name === 'create' ? (
         <EventForm
           token={token}
-          onCancel={() => setScreen({ name: 'list' })}
-          onSaved={(id) => setScreen({ name: 'detail', id })}
+          onCancel={() => go({ name: 'list' })}
+          onSaved={(id) => go({ name: 'detail', id })}
         />
       ) : null}
       {screen.name === 'edit' ? (
         <EventForm
           token={token}
           event={screen.event}
-          onCancel={() => setScreen({ name: 'detail', id: screen.event.id })}
-          onSaved={(id) => setScreen({ name: 'detail', id })}
+          onCancel={() => go({ name: 'detail', id: screen.event.id })}
+          onSaved={(id) => go({ name: 'detail', id })}
         />
       ) : null}
       {screen.name === 'map' ? (
-        <MapScreen token={token} eventId={screen.id} onBack={() => setScreen({ name: 'detail', id: screen.id })} />
+        <MapScreen token={token} eventId={screen.id} onBack={() => go({ name: 'detail', id: screen.id })} />
       ) : null}
+      </>
+      ) : (
+        <View style={styles.loading}>
+          <ActivityIndicator color={colors.accent} />
+        </View>
+      )}
     </View>
   );
 }
@@ -249,20 +366,6 @@ function EventList({
   useEffect(() => {
     load();
   }, [load]);
-
-  useEffect(() => {
-    if (Platform.OS !== 'web' || typeof window === 'undefined') {
-      return;
-    }
-    const sessionId = new URLSearchParams(window.location.search).get('checkout_session_id');
-    if (!sessionId) {
-      return;
-    }
-    window.history.replaceState({}, '', window.location.pathname);
-    confirmCheckout(token, sessionId)
-      .then(() => load())
-      .catch((reason: unknown) => setError(messageFrom(reason)));
-  }, [load, token]);
 
   const unpaid = events?.filter((event) => event.registered && !event.paid) ?? [];
 
@@ -1734,6 +1837,11 @@ function messageFrom(reason: unknown): string {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
+  loading: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   header: {
     paddingHorizontal: 24,
     paddingTop: 12,
